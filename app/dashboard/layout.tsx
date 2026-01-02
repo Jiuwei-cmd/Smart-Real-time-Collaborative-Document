@@ -1,12 +1,12 @@
 'use client';
 import { useEffect } from 'react';
-// import {ReactNode} from 'react';
-import { useState } from 'react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { createClientSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { Settings, LogOut } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useState } from 'react';
+import { useUserStore } from '../store/useUserStore';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,23 +17,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
+import { useUserProfileStore } from '../store/useUserProfileStore';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const supabase = createClientSupabaseClient();
-  const [user, setUser] = useState<any>(null); // 或定义更精确的类型
+  // const [user, setUser] = useState<any>(null);
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
+  const user = useUserStore((state) => state.user);
+  const profile = useUserProfileStore((state) => state.profile);
+  const fetchUserProfile = useUserProfileStore((state) => state.fetchUserProfile);
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error) {
-        console.error('获取用户失败:', error);
-      } else {
-        setUser(user);
-      }
-    };
-    fetchUser();
+    fetchUserProfile();
   }, []);
 
   // 退出登录处理函数
@@ -58,13 +54,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* 顶部导航栏 */}
       <header className="w-full p-4 border-b border-border">
         <div className="flex justify-between items-center max-w-5xl mx-auto">
-          <h1 className="text-xl font-bold">{user?.email || '用户'} - 你的笔记管理平台</h1>
+          <h1 className="text-xl font-bold">{profile?.nickname || user?.email || '用户'} - 你的笔记管理平台</h1>
           <div className='flex items-center gap-2'>
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Avatar className='mr-2 cursor-pointer'>
-                  <AvatarImage src={user?.user_metadata?.avatar_url || ''} />
+                  {/* <AvatarImage src={user?.user_metadata?.avatar_url || ''} /> */}
+                  <AvatarImage src={profile?.avatar_url || ''} />
                   <AvatarFallback>
                     {user?.email?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>
