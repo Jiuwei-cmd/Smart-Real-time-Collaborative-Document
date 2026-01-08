@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/button';
 import { Plus, Search, EditIcon, RotateCcw, X, Trash2, CheckSquare } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Select,
   SelectContent,
@@ -13,12 +13,33 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { NoteCard } from '@/components/NoteCard';
+import { useTagsStore } from '@/app/store/useTagsStore';
 
 
 
 export default function DashboardHomePage() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedAllNotes, setSelectedAllNotes] = useState(false);
+  const [selectedTag, setSelectedTag] = useState('全部标签');
+
+  // Tag state management - use Zustand store
+  const { tags: storeTags, fetchTags } = useTagsStore();
+
+  // Fetch tags on component mount
+  useEffect(() => {
+    fetchTags();
+  }, []);
+
+  // Transform store tags into display format with "全部标签" at the beginning
+  const displayTags = useMemo(() => {
+    const allTagsOption = { id: 'all', value: '全部标签', label: '全部标签' };
+    const dbTags = storeTags.map(tag => ({
+      id: tag.id,
+      value: tag.value,
+      label: tag.value
+    }));
+    return [allTagsOption, ...dbTags];
+  }, [storeTags]);
 
   return (
     <div className=" mx-auto w-full">
@@ -45,17 +66,17 @@ export default function DashboardHomePage() {
         <div className="flex items-center gap-2">
           <span>标签类型：</span>
           {/* 下拉菜单 */}
-          <Select>
+          <Select value={selectedTag} onValueChange={setSelectedTag}>
             <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="全部" />
+              <SelectValue placeholder="全部标签" />
             </SelectTrigger>
-            <SelectContent className='mt-10'>
+            <SelectContent>
               <SelectGroup>
-                <SelectItem value="apple">Apple</SelectItem>
-                <SelectItem value="banana">Banana</SelectItem>
-                <SelectItem value="blueberry">Blueberry</SelectItem>
-                <SelectItem value="grapes">Grapes</SelectItem>
-                <SelectItem value="pineapple">Pineapple</SelectItem>
+                {displayTags.map((tag: { id: string; value: string; label: string }) => (
+                  <SelectItem key={tag.id} value={tag.value}>
+                    {tag.label}
+                  </SelectItem>
+                ))}
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -89,7 +110,7 @@ export default function DashboardHomePage() {
           </div>
         )}
         <Button asChild>
-          <Link href="/dashboard/notes/new">
+          <Link href="/dashboard/notes">
             <Plus className="h-4 w-4" />
             新建笔记
           </Link>

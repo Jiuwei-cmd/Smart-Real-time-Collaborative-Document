@@ -7,8 +7,8 @@ interface UserProfile {
   id: string;
   nickname?: string;
   avatar_url?: string;
-  // created_at: string; // 暂时不需要
-  // updated_at: string; // 暂时不需要
+  created_at: string;
+  updated_at: string;
 }
 
 interface UserProfileState {
@@ -42,7 +42,7 @@ export const useUserProfileStore = create<UserProfileState>()(
         // 2. 查询 users 表
         const { data, error } = await supabase
           .from('users')
-          .select('id, nickname, avatar_url')
+          .select('id, nickname, avatar_url, created_at, updated_at')
           .eq('id', user.id)
           .single();
 
@@ -50,7 +50,8 @@ export const useUserProfileStore = create<UserProfileState>()(
           // 如果是找不到记录，可能还没创建，不算严重错误，但这里视业务逻辑而定
           // 假设查不到就是空
           if (error.code === 'PGRST116') {
-            set({ profile: { id: user.id }, loading: false, error: null });
+            const now = new Date().toISOString();
+            set({ profile: { id: user.id, created_at: now, updated_at: now }, loading: false, error: null });
           } else {
             console.error('Supabase fetchUserProfile error:', error);
             set({ error: error.message, loading: false });
@@ -93,14 +94,14 @@ export const useUserProfileStore = create<UserProfileState>()(
         // nickname: nickname?.trim() || null,
         // avatar_url: avatarUrl || null,
 
-        const payload: any = { id: user.id };
+        const payload: any = { id: user.id, updated_at: new Date().toISOString() };
         if (nickname !== undefined) payload.nickname = nickname?.trim() || null;
         if (avatarUrl !== undefined) payload.avatar_url = avatarUrl || null;
 
         const { data, error } = await supabase
           .from('users')
           .upsert(payload, { onConflict: 'id' })
-          .select('id, nickname, avatar_url')
+          .select('id, nickname, avatar_url, created_at, updated_at')
           .single();
 
         if (error) {
