@@ -39,11 +39,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { BasicMarksKit } from '@/components/basic-marks-kit';
+import { BasicMarksKit } from '@/components/editor/plugins/basic-marks-kit';
 import {
   type TDiscussion,
   discussionPlugin,
-} from '@/components/discussion-kit';
+} from '@/components/editor/plugins/discussion-kit';
 
 import { Editor, EditorContainer } from './editor';
 

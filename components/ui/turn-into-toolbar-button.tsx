@@ -35,7 +35,7 @@ import {
 import {
   getBlockType,
   setBlockType,
-} from '@/components/transforms';
+} from '@/components/editor/transforms';
 
 import { ToolbarButton, ToolbarMenuGroup } from './toolbar';
 

@@ -22,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { uploadAvatar } from '@/utils/uploadAvatar';
+import { uploadAvatar } from '@/lib/utils/uploadAvatar';
 // import { updateProfile } from '@/actions/updateProfile';
 import { useUserProfileStore } from '@/app/store/useUserProfileStore';
 import { Controller, useForm } from 'react-hook-form'

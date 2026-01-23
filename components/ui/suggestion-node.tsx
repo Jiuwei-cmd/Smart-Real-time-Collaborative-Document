@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import {
   type SuggestionConfig,
   suggestionPlugin,
-} from '@/components/suggestion-kit';
+} from '@/components/editor/plugins/suggestion-kit';
 
 const suggestionVariants = cva(
   cn(

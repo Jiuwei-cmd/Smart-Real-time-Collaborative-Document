@@ -1,0 +1,27 @@
+/* 隐藏滚动条轨道和滑块（默认） */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE 和 Edge */
+  scrollbar-width: none;     /* Firefox */
+}
+
+/* 悬停时显示细滚动条 */
+.show-scrollbar-on-hover:hover::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.show-scrollbar-on-hover:hover::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.show-scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+.show-scrollbar-on-hover:hover::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}

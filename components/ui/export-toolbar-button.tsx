@@ -17,7 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { BaseEditorKit } from '@/components/editor-base-kit';
+import { BaseEditorKit } from '../editor/editor-base-kit';
 
 import { EditorStatic } from './editor-static';
 import { ToolbarButton } from './toolbar';

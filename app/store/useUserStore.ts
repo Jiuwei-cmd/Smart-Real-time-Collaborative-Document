@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { User } from '@supabase/supabase-js';
 import { createClientSupabaseClient } from '@/lib/supabase/client';
+import { setSessionUserId, clearSessionUserId } from '@/lib/utils/session';
 
 interface UserState {
   user: User | null;
@@ -34,8 +35,13 @@ export const useUserStore = create<UserState>()(
           if (error) {
             console.error('Supabase getUser error:', error);
             set({ user: null, loading: false, error: error.message });
+            clearSessionUserId(); // 清除 sessionStorage
           } else {
             set({ user, loading: false, error: null });
+            // 保存用户 ID 到 sessionStorage
+            if (user) {
+              setSessionUserId(user.id);
+            }
           }
         });
 
@@ -47,6 +53,12 @@ export const useUserStore = create<UserState>()(
               loading: false,
               error: null,
             });
+            // 同步更新 sessionStorage
+            if (session?.user) {
+              setSessionUserId(session.user.id);
+            } else {
+              clearSessionUserId();
+            }
           }
         );
 
@@ -60,7 +72,7 @@ export const useUserStore = create<UserState>()(
       // 清理用户状态（通常不需要手动调用，除非特殊场景）
       clearUser: () => {
         set({ user: null, loading: false, error: null });
-        // 如果需要，也可以在这里取消监听（但一般 layout 不卸载，可不处理）
+        clearSessionUserId(); // 清除 sessionStorage
       },
     };
   })

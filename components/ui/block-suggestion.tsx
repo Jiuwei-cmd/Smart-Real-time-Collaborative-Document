@@ -29,8 +29,8 @@ import { Button } from '@/components/ui/button';
 import {
   type TDiscussion,
   discussionPlugin,
-} from '@/components/discussion-kit';
-import { suggestionPlugin } from '@/components/suggestion-kit';
+} from '@/components/editor/plugins/discussion-kit';
+import { suggestionPlugin } from '@/components/editor/plugins/suggestion-kit';
 
 import {
   type TComment,

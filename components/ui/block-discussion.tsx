@@ -36,8 +36,8 @@ import { commentPlugin } from '@/components/editor/plugins/comment-kit';
 import {
   type TDiscussion,
   discussionPlugin,
-} from '@/components/discussion-kit';
-import { suggestionPlugin } from '@/components/suggestion-kit';
+} from '@/components/editor/plugins/discussion-kit';
+import { suggestionPlugin } from '@/components/editor/plugins/suggestion-kit';
 
 import {
   BlockSuggestionCard,
