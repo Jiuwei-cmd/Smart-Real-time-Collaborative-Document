@@ -97,11 +97,12 @@ export const useNoteStore = create<NoteState>()(
       }
     },
 
-    updateNote: async (noteId: string, title: string, content: any, tagId: string | null) => {
+    updateNote: async (noteId: string, title: string, content: any, tagId: string | null, ownerId?: string | null) => {
       set({ loading: true, error: null });
       try {
         // 从 sessionStorage 获取当前标签页的用户 ID
-        const userId = getSessionUserId();
+
+        const userId = ownerId || getSessionUserId();
 
         if (!userId) {
           const msg = '未登录';

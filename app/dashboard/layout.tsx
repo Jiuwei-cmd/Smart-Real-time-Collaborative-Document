@@ -3,11 +3,15 @@ import { useEffect } from 'react';
 import { ThemeToggle } from '@/components/editor/plugins/ThemeToggle';
 import { createClientSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { Settings, LogOut, Bell, MessageCircle, UserPlus } from 'lucide-react';
+import { Settings, LogOut, Bell, MessageCircle, UserPlus, Smile, Scissors } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { useState, useRef } from 'react';
+import dynamic from 'next/dynamic';
+
+// 动态导入 EmojiPicker 以避免 SSR 问题
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 import { useUserStore } from '../store/useUserStore';
 import {
   AlertDialog,
@@ -37,6 +41,11 @@ import { addFriend, searchUserByEmail, getFriendRequestsReceived, acceptFriendRe
 import { UserProfile } from '@/lib/api/users';
 import { subscribeDocumentShares, getSharedWithMe } from '@/lib/api/shares';
 import { usePresence } from '@/hooks/usePresence';
+import { createPortal } from 'react-dom';
+import { DrawingCanvas } from '@/components/ui/DrawingCanvas';
+// import html2canvas from 'html2canvas';
+import { domToCanvas } from 'modern-screenshot';
+import { env } from 'process';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -62,6 +71,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const messagesEndRef = useRef<HTMLDivElement>(null); // 消息列表底部引用
   const [processingFriendRequestId, setProcessingFriendRequestId] = useState<string | null>(null); // 正在处理的请求ID（发送请求）
   const [sentRequestIds, setSentRequestIds] = useState<Set<string>>(new Set()); // 已发送请求的用户ID集合
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false); // 表情选择器显示状态
+  const [isSelecting, setIsSelecting] = useState(false); // 截图选择状态
+  const [rect, setRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const [isDrawingEnabled, setIsDrawingEnabled] = useState(false); // 画笔功能启用状态
+  const [drawingColor, setDrawingColor] = useState('#ff0000'); // 画笔颜色，默认红色
+  
+  // 文字提取结果弹窗状态
+  const [isTextExtractDialogOpen, setIsTextExtractDialogOpen] = useState(false);
+  const [extractedImage, setExtractedImage] = useState<string>('');
+  const [extractedText, setExtractedText] = useState<string>('');
+  const [isExtracting, setIsExtracting] = useState(false);
   
   // 分享给我的笔记列表
   interface SharedNoteItem {
@@ -359,6 +379,236 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push('/auth');
   };
 
+  // 1. 开始截图模式
+  // const startScreenshot = () => setIsSelecting(true);
+  // 1. 定义 Ref 来存储坐标，这样监听器永远能拿到最新值
+  const startPosRef = useRef({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const [showControls, setShowControls] = useState(false);
+  const controlPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isSelecting) {
+      document.body.style.removeProperty('cursor');
+      document.body.style.removeProperty('overflow');
+      return;
+    }
+
+    document.body.style.setProperty('cursor', 'crosshair', 'important');
+    // 禁止页面滚动
+    document.body.style.setProperty('overflow', 'hidden', 'important');
+
+    // 拦截滚轮事件，彻底阻止滚动
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    // 拦截触摸滑动（移动端）
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+
+    const onMouseDown = (e: MouseEvent) => {
+
+      if (controlPanelRef.current?.contains(e.target as Node)) {
+      return;
+    }
+
+    // 如果控制面板已显示（已经有选区），则不处理新的截图选择
+    if(showControls){
+      // 只有在画笔模式未启用时才直接返回，启用时由 DrawingCanvas 处理
+      if (!isDrawingEnabled) {
+        return;
+      }
+      // 如果画笔模式已启用，也返回，让 DrawingCanvas 处理事件
+      return;
+    }
+    
+      e.stopImmediatePropagation();
+      isDraggingRef.current = true; // 更新 Ref
+      setShowControls(false);
+      
+      const { clientX, clientY } = e;
+      startPosRef.current = { x: clientX, y: clientY }; // 记录起点到 Ref
+      
+      // 初始化 UI 上的矩形
+      setRect({ left: clientX, top: clientY, width: 0, height: 0 });
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      e.stopImmediatePropagation();
+
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+      const startX = startPosRef.current.x;
+      const startY = startPosRef.current.y;
+
+      // 自动处理反向拖拽（从右往左或从下往上）
+      setRect({
+        left: Math.min(startX, currentX),
+        top: Math.min(startY, currentY),
+        width: Math.abs(currentX - startX),
+        height: Math.abs(currentY - startY),
+      });
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      e.stopImmediatePropagation();
+      isDraggingRef.current = false;
+      setShowControls(true);
+      // 绘制完选区后恢复默认鼠标样式
+      document.body.style.removeProperty('cursor');
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setRect({ left: 0, top: 0, width: 0, height: 0 });
+        setIsSelecting(false);
+        setIsDrawingEnabled(false); // 重置画笔状态
+        setShowControls(false); // 重置控制面板状态
+        setDrawingColor('#ff0000'); // 重置颜色为红色
+      }
+    };
+
+    // 绑定监听器
+    window.addEventListener('mousedown', onMouseDown, true);
+    window.addEventListener('mousemove', onMouseMove, true);
+    window.addEventListener('mouseup', onMouseUp, true);
+    window.addEventListener('keydown', onKeyDown, true);
+
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown, true);
+      window.removeEventListener('mousemove', onMouseMove, true);
+      window.removeEventListener('mouseup', onMouseUp, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('wheel', onWheel, true);
+      window.removeEventListener('touchmove', onTouchMove, true);
+    };
+  }, [isSelecting, showControls, isDrawingEnabled]); // 添加所有在 effect 中使用的状态
+
+  // ========== 公共方法：截取选区，返回 { dataUrl, base64 } ==========
+  const captureSelectedArea = async (): Promise<{ dataUrl: string; base64: string } | null> => {
+    // 1. 先保存画笔涂鸦层（必须在 setShowControls(false) 之前，否则组件卸载后拿不到）
+    const drawingCanvas = document.querySelector<HTMLCanvasElement>('[data-drawing-canvas="true"]');
+    const savedDrawingCanvas = document.createElement('canvas');
+    if (drawingCanvas) {
+      savedDrawingCanvas.width = drawingCanvas.width;
+      savedDrawingCanvas.height = drawingCanvas.height;
+      savedDrawingCanvas.getContext('2d')?.drawImage(drawingCanvas, 0, 0);
+    }
+
+    // 2. 隐藏工具栏，避免截图截到按钮
+    setShowControls(false);
+
+    // 3. 截取整个页面
+    const fullCanvas = await domToCanvas(document.body, {
+      scale: window.devicePixelRatio,
+      features: { restoreScrollPosition: true },
+    });
+
+    // 4. 裁剪到选区
+    const { left, top, width, height } = rect;
+    const dpr = window.devicePixelRatio || 1;
+    const cropTop = top + window.scrollY;
+    const cropLeft = left + window.scrollX;
+
+    const croppedCanvas = document.createElement('canvas');
+    croppedCanvas.width = width * dpr;
+    croppedCanvas.height = height * dpr;
+    const ctx = croppedCanvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.drawImage(
+      fullCanvas,
+      cropLeft * dpr, cropTop * dpr, width * dpr, height * dpr,
+      0, 0, width * dpr, height * dpr
+    );
+
+    // 5. 叠加画笔涂鸦层
+    if (drawingCanvas) {
+      ctx.drawImage(savedDrawingCanvas, 0, 0, width * dpr, height * dpr);
+    }
+
+    const dataUrl = croppedCanvas.toDataURL('image/png');
+    const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+    return { dataUrl, base64 };
+  };
+
+  // ========== 完成截图：截取选区并下载 ==========
+  const handleSaveScreenshot = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const result = await captureSelectedArea();
+      if (result) {
+        const link = document.createElement('a');
+        link.href = result.dataUrl;
+        link.download = `screenshot_${Date.now()}.png`;
+        link.click();
+      }
+    } catch (error) {
+      console.error('截图失败:', error);
+      setShowControls(true);
+    } finally {
+      setIsSelecting(false);
+      setRect({ left: 0, top: 0, width: 0, height: 0 });
+      setIsDrawingEnabled(false);
+      setShowControls(false);
+      setDrawingColor('#ff0000');
+    }
+  };
+
+
+  // ========== 提取文字：截取选区 → 弹窗展示结果 ==========
+  const handleExtractText = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const result = await captureSelectedArea();
+      if (!result) return;
+      
+      // 1. 设置状态并打开面板
+      setExtractedImage(result.dataUrl);
+      setExtractedText('');
+      setIsExtracting(true);
+      setIsTextExtractDialogOpen(true);
+
+      // 2. 隐藏截图相关控制层并恢复正常的UI
+      setIsSelecting(false);
+      setRect({ left: 0, top: 0, width: 0, height: 0 });
+      setIsDrawingEnabled(false);
+      setShowControls(false);
+      setDrawingColor('#ff0000');
+
+      // 3. 调用 API 获取文字
+      const response = await fetch('/api/recognize-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64Data: result.base64 }),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || '识别失败');
+      }
+      const { content: text } = await response.json();
+      setExtractedText(text);
+
+    } catch (error) {
+      console.error('提取文字失败:', error);
+      // 如果出错，就在文本框里显示错误信息
+      setExtractedText('提取文字失败，请检查 API Key 是否配置正确或刷新重试。');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+
+
   return (
     <div className="min-h-screen bg-background">
       <AlertDialog open={isLogoutDialogOpen}>
@@ -372,6 +622,61 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 提取文字对话框 */}
+      <Dialog open={isTextExtractDialogOpen} onOpenChange={setIsTextExtractDialogOpen}>
+        <DialogContent 
+          className="flex flex-col p-6 transition-all duration-300"
+          style={{
+            maxWidth: rect.width > rect.height ? '1000px' : '800px',
+            width: '90vw',
+            height: rect.height > rect.width ? '85vh' : '70vh'
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>提取结果</DialogTitle>
+          </DialogHeader>
+          <div className={`flex flex-1 gap-4 overflow-hidden mt-4 ${rect.height > rect.width * 1.5 ? 'flex-row' : 'flex-col md:flex-row'}`}>
+            {/* 存放图片 */}
+            <div className={`border rounded-md flex items-center justify-center bg-muted/30 overflow-hidden relative ${rect.height > rect.width * 1.5 ? 'w-1/2' : 'flex-1'}`}>
+              {extractedImage && (
+                <img src={extractedImage} alt="Extracted" className="max-w-full max-h-full object-contain" />
+              )}
+            </div>
+            {/* 右侧文字 */}
+            <div className={`border rounded-md relative flex flex-col ${rect.height > rect.width * 1.5 ? 'w-1/2' : 'flex-1'}`}>
+              {isExtracting ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+                  <svg className="h-8 w-8 animate-spin mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>正在识别中...</span>
+                </div>
+              ) : (
+                <>
+                  <textarea 
+                    className="flex-1 w-full p-4 resize-none border-none focus:outline-none bg-transparent"
+                    value={extractedText}
+                    readOnly
+                  />
+                  <div className="absolute right-4 bottom-4">
+                    <Button 
+                      size="sm" 
+                      onClick={() => {
+                        navigator.clipboard.writeText(extractedText);
+                        toast.success('已复制到剪贴板');
+                      }}
+                    >
+                      复制文字
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* 添加好友对话框 */}
       <Dialog open={isAddFriendDialogOpen} onOpenChange={setIsAddFriendDialogOpen}>
@@ -678,7 +983,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     size="sm"
                     className="mt-3 w-full"
                     onClick={() => {
-                      router.push(`/dashboard/notes?id=${note.documentId}`);
+                      router.push(`/dashboard/notes?id=${note.documentId}&ownerName=${encodeURIComponent(note.ownerName)}&ownerId=${note.ownerId}`);
                       setIsNotificationDrawerOpen(false);
                     }}
                   >
@@ -780,8 +1085,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </Drawer>
 
       {/* 好友聊天抽屉 */}
-      <Drawer open={isChatDrawerOpen} onOpenChange={setIsChatDrawerOpen} direction="left">
+      <Drawer open={isChatDrawerOpen} onOpenChange={setIsChatDrawerOpen} direction="left" dismissible={!isSelecting}>
         <DrawerContent drawerWidth="data-[vaul-drawer-direction=left]:w-[85%] data-[vaul-drawer-direction=left]:sm:max-w-4xl">
+          {/* {isSelecting && (
+            <div className="absolute inset-0 z-[100] bg-transparent cursor-crosshair" />
+          )} */}
           <DrawerHeader>
             <DrawerTitle>好友与聊天</DrawerTitle>
             <DrawerDescription>与好友交流，查看聊天记录</DrawerDescription>
@@ -886,27 +1194,74 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       </div>
                       
                       {/* 输入区域 */}
-                      <div className="flex gap-2 pt-2 border-t">
-                        <input 
-                          type="text" 
-                          placeholder="输入消息..." 
-                          value={messageInput}
-                          onChange={(e) => setMessageInput(e.target.value)}
-                          onKeyPress={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSendMessage();
-                            }
-                          }}
-                          className="flex-1 px-3 py-2 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                        />
-                        <button 
-                          onClick={handleSendMessage}
-                          disabled={!messageInput.trim()}
-                          className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          发送
-                        </button>
+                      <div className="relative pt-2 border-t">
+                        {/* 表情选择器 */}
+                        {showEmojiPicker && (
+                          <div className="absolute bottom-full mb-2 left-0 z-50">
+                            <EmojiPicker
+                              onEmojiClick={(emojiData) => {
+                                setMessageInput((prev) => prev + emojiData.emoji);
+                                setShowEmojiPicker(false);
+                              }}
+                              width={350}
+                              height={400}
+                            />
+                          </div>
+                        )}
+                        
+                        {/* 工具栏 */}
+                        <div className="flex items-center gap-1 py-2 px-1">
+                          {/* 表情按钮 */}
+                          <button
+                            type="button"
+                            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                            className={`p-2 rounded-lg hover:bg-accent transition-colors ${showEmojiPicker ? 'bg-accent' : ''}`}
+                            title="表情"
+                          >
+                            <Smile className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+                          </button>
+                          
+                          {/* 截图按钮 */}
+                          <button
+                            type="button"
+                            onClick={() => setIsSelecting(true)}
+                            className="p-2 rounded-lg hover:bg-accent transition-colors"
+                            title="截图"
+                          >
+                            <Scissors className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+                          </button>
+                          
+                          {/* 右侧占位符，用于后续添加更多工具 */}
+                          <div className="flex-1"></div>
+                        </div>
+                        
+                        {/* 输入框 */}
+                        <div className="px-1">
+                          <textarea 
+                            placeholder="输入消息..." 
+                            value={messageInput}
+                            onChange={(e) => setMessageInput(e.target.value)}
+                            onKeyPress={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSendMessage();
+                              }
+                            }}
+                            rows={3}
+                            className="w-full px-3 py-2 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring text-sm resize-none"
+                          />
+                        </div>
+                        
+                        {/* 发送按钮 */}
+                        <div className="flex justify-end px-1 pb-2 pt-2">
+                          <button 
+                            onClick={handleSendMessage}
+                            disabled={!messageInput.trim()}
+                            className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            发送
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -956,6 +1311,128 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {children}
         </div>
       </main>
+
+      {/* 截图遮罩层 */}
+      {isSelecting && createPortal(
+        <div className="fixed inset-0 z-[999]">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow-lg z-[1001]">
+            <p className="text-sm text-foreground">
+              按 <kbd className="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">ESC</kbd> 键退出截图模式
+            </p>
+          </div>
+          {/* 显眼的选区框 */}
+          <div style={{
+            position: 'absolute',
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            border: '2px dashed #fff',
+            backgroundColor: 'transparent',
+            boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)', // 外部黑色半透明遮罩
+            // pointerEvents: 'none' // 不阻挡鼠标事件
+          }} />
+
+          {showControls && (
+            <DrawingCanvas
+              rect={rect} 
+              isEnabled={isDrawingEnabled} 
+              color={drawingColor}
+            />
+          )}
+          
+          {/* 截图选区框下方的操作按钮 */}
+          {(showControls && rect.width > 20 && rect.height > 20) && (
+            <div
+             ref={controlPanelRef}
+             style={{
+              position: 'absolute',
+              left: rect.left + rect.width,
+              top: rect.top + rect.height + 12,
+              transform: 'translateX(-100%)', // 向左平移自身宽度，实现右对齐
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              alignItems: 'flex-end', // 内部元素右对齐
+              pointerEvents: 'auto', // 【重要】强制按钮区接收交互
+              zIndex: 1000001
+            }}>
+              {/* 第一行：操作按钮 */}
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                {/* 提取文字按钮 */}
+                <button 
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-lg transition-all duration-200 flex items-center gap-2 text-sm font-medium whitespace-nowrap"
+                  onClick={handleExtractText}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  提取文字
+                </button>
+                <button 
+                  className={`px-4 py-2 text-white rounded-lg shadow-lg transition-all duration-200 flex items-center gap-2 text-sm font-medium whitespace-nowrap ${
+                    isDrawingEnabled 
+                      ? 'bg-purple-600 hover:bg-purple-700' 
+                      : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!isDrawingEnabled) {
+                      setIsDrawingEnabled(true);
+                    }
+                  }}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                  画笔模式
+                </button>
+                {/* 完成截屏按钮 */}
+                <button 
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg shadow-lg transition-all duration-200 flex items-center gap-2 text-sm font-medium whitespace-nowrap"
+                  onClick={(e) => handleSaveScreenshot(e)}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  完成
+                </button>
+              </div>
+              
+              {/* 第二行：颜色选择器 - 只在画笔模式启用时显示 */}
+              {isDrawingEnabled && (
+                <div className="flex items-center gap-2 px-3 py-2 mr-10 bg-white dark:bg-gray-800 rounded-lg shadow-lg w-fit">
+                  {[
+                    { color: '#ff0000', name: '红色' },
+                    { color: '#00ff00', name: '绿色' },
+                    { color: '#0000ff', name: '蓝色' },
+                    { color: '#ffff00', name: '黄色' },
+                    { color: '#ff00ff', name: '紫色' },
+                    { color: '#000000', name: '黑色' },
+                    { color: '#ffffff', name: '白色' },
+                  ].map((item) => (
+                    <button
+                      key={item.color}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDrawingColor(item.color);
+                      }}
+                      className={`w-5 h-5 rounded-full border-2 transition-all ${
+                        drawingColor === item.color 
+                          ? 'border-blue-500 scale-110' 
+                          : 'border-gray-300 hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: item.color }}
+                      title={item.name}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

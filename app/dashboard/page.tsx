@@ -232,10 +232,12 @@ export default function DashboardHomePage() {
 
       <div className="flex justify-between items-center mb-6">
         {!isEditMode ? (
-          <Button variant="outline" onClick={() => setIsEditMode(true)}>
-            <EditIcon className="h-4 w-4" />
-            编辑文档
-          </Button>
+          notes.length > 0 && (
+            <Button variant="outline" onClick={() => setIsEditMode(true)}>
+              <EditIcon className="h-4 w-4" />
+              编辑文档
+            </Button>
+          )
         ) : (
           <div className="flex gap-2">
             <Button 
@@ -277,12 +279,14 @@ export default function DashboardHomePage() {
             </Button>
           </div>
         )}
-        <Button asChild>
-          <Link href="/dashboard/notes">
-            <Plus className="h-4 w-4" />
-            新建文档
-          </Link>
-        </Button>
+        {notes.length > 0 && (
+          <Button asChild>
+            <Link href="/dashboard/notes">
+              <Plus className="h-4 w-4" />
+              新建文档
+            </Link>
+          </Button>
+        )}
       </div>
 
       {/* 笔记列表 */}
@@ -326,9 +330,44 @@ export default function DashboardHomePage() {
           })}
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-          <p className="text-lg">暂无笔记</p>
-          <p className="text-sm mt-2">点击新建笔记开始记录吧</p>
+        <div className="flex flex-col items-center justify-center py-32">
+          {/* 图标容器 - 带渐变背景 */}
+          <Link href="/dashboard/notes" className="block mb-8 group cursor-pointer">
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-purple-500/20 blur-3xl rounded-full group-hover:from-primary/30 group-hover:to-purple-500/30 transition-all"></div>
+              <div className="relative bg-gradient-to-br from-primary/10 to-purple-500/10 p-8 rounded-full group-hover:from-primary/20 group-hover:to-purple-500/20 transition-all group-hover:scale-110 transform duration-300">
+                <Plus className="h-20 w-20 text-primary" strokeWidth={1.5} />
+              </div>
+            </div>
+          </Link>
+          
+          {/* 文字内容 */}
+          <h3 className="text-2xl font-bold text-foreground mb-2">开始您的第一篇笔记</h3>
+          <p className="text-muted-foreground text-center max-w-md">
+            记录想法、整理思绪、创作内容 —— 一切从这里开始
+          </p>
+          
+          {/* 小提示 */}
+          <div className="mt-12 flex items-center gap-6 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-primary font-semibold">✓</span>
+              </div>
+              <span>支持富文本编辑</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-primary font-semibold">✓</span>
+              </div>
+              <span>云端自动保存</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <span className="text-primary font-semibold">✓</span>
+              </div>
+              <span>标签分类管理</span>
+            </div>
+          </div>
         </div>
       )}
 

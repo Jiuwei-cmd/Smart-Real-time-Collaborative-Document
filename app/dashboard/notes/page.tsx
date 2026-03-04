@@ -67,6 +67,7 @@ import { ArrowLeft } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTagsStore } from '@/app/store/useTagsStore';
 import { useNoteStore } from '@/app/store/useNoteStore';
+import { useUserStore } from '@/app/store/useUserStore';
 import { toast } from 'sonner';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { useNetworkStatus } from '@/hooks/useNetworkStatus';
@@ -74,11 +75,30 @@ import { dbHelpers } from '@/lib/db/localDB';
 import { formatRelativeTime } from '@/lib/utils/timeUtils';
 import { NetworkStatusBanner } from '@/components/ui/network-status-banner';
 import { fetchNoteById } from '@/lib/api/notes';
+import { Users } from 'lucide-react';
+import { YjsPlugin } from '@platejs/yjs/react';
+import { RemoteCursorOverlay } from '@/components/ui/remote-cursor-overlay';
+import { useMounted } from '@/hooks/use-mounted';
+import { useUserProfileStore } from '@/app/store/useUserProfileStore';
+
+// 根据用户ID生成一致的颜色
+function getUserColor(userId: string): string {
+  const colors = [
+    '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
+    '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'
+  ];
+  const hash = userId.split('').reduce((acc, char) => {
+    return char.charCodeAt(0) + ((acc << 5) - acc);
+  }, 0);
+  return colors[Math.abs(hash) % colors.length];
+}
 
 export default function NoteDetailPage() {
   // 获取 URL 查询参数
   const searchParams = useSearchParams();
   const noteId = searchParams.get('id'); // 如果是新建笔记，id 为 null；如果是编辑，id 为笔记ID
+  const noteOwnerName = searchParams.get('ownerName'); // 从URL获取所有者名称
+  const noteOwnerId = searchParams.get('ownerId'); // 从URL获取所有者ID
   
   const router = useRouter();
   const lowlight = createLowlight(all);
@@ -86,6 +106,8 @@ export default function NoteDetailPage() {
   // 网络状态和自动同步
   const isOnline = useNetworkStatus();
   useAutoSync();
+
+  const { profile } = useUserProfileStore();
   
   const editor = usePlateEditor({
     plugins: [
@@ -130,7 +152,38 @@ export default function NoteDetailPage() {
       ...CommentKit,
       ...BlockMenuKit,
       ...FloatingToolbarKit, // Floating toolbar for text selection
+      YjsPlugin.configure({
+        render: {
+          afterEditable: RemoteCursorOverlay,
+        },
+        options:{
+          cursors: {
+            data: {
+              name: profile?.nickname, // 用户名,
+              color: getUserColor(profile!.id),
+            }
+          },
+          providers: [
+            {
+              type: 'hocuspocus',
+              options: {
+                name: `note-${noteId}`, // ✅ 使用笔记ID作为文档标识符
+                url: process.env.NEXT_PUBLIC_COLLABORATION_SERVER_URL || 'ws://localhost:8888',
+              },
+            },
+            // WebRTC 配置（可选，暂时注释掉）
+            // {
+            //   type: 'webrtc',
+            //   options: {
+            //     roomName: `note-${noteId}`,
+            //     signaling: ['ws://localhost:4444'],
+            //   },
+            // }
+          ],
+        }
+      })
     ], // 添加标记插件
+    skipInitialization: true, // ⚠️ 重要：使用 Yjs 时必须跳过默认初始化
     // value: initialValue,         // 设置初始内容
   }); // 初始化编辑器实例
 
@@ -147,6 +200,13 @@ export default function NoteDetailPage() {
   
   // 跟踪笔记是否已加载，避免重复加载
   const loadedNoteId = useRef<string | null>(null);
+  
+  // 跟踪 Yjs 是否已初始化，避免重复初始化导致内容重复
+  const yjsInitializedRef = useRef<string | null>(null);
+  
+  // 共享笔记相关状态
+  const [isSharedNote, setIsSharedNote] = useState(false);
+  // const [noteOwnerName, setNoteOwnerName] = useState<string>('');
 
   // Tag state management - use Zustand store
   const { tags: storeTags, fetchTags, addTag, deleteTag: deleteTagFromStore } = useTagsStore();
@@ -154,8 +214,15 @@ export default function NoteDetailPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
 
+  // 更新时间
+  const [updatedAt, setUpdatedAt] = useState('');
+
   // Note state management - use Zustand store
   const { notes, saveNote, updateNote, loading } = useNoteStore();
+  
+  // User state management - get current user
+  const { user: currentUser } = useUserStore();
+
 
   // Fetch tags on component mount
   useEffect(() => {
@@ -186,9 +253,23 @@ export default function NoteDetailPage() {
             console.log('✅ 笔记已缓存到本地，支持离线编辑');
           });
           
+          // 🔑 判断笔记类型：是否为共享笔记
+          if (currentUser?.id && note.user_id !== currentUser.id) {
+            console.log('📝 这是一个共享笔记，创建者ID:', note.user_id);
+            setIsSharedNote(true);
+            
+            // 优先使用URL参数中的所有者名称，否则显示默认文本
+            
+          } else {
+            setIsSharedNote(false);
+          }
+          
           // 设置标题
           // eslint-disable-next-line react-hooks/exhaustive-deps
           setNoteTitle(note.title);
+
+          // 设置更新时间
+          setUpdatedAt(formatRelativeTime(note.updated_at));
           
           // 设置标签 - 根据 tag_id 找到对应的 tag value
           if (note.tag_id) {
@@ -222,8 +303,10 @@ export default function NoteDetailPage() {
       console.log('正在新建笔记');
       // 重置加载标志
       loadedNoteId.current = null;
+      // 重置共享笔记状态
+      setIsSharedNote(false);
     }
-  }, [noteId, notes, storeTags, editor]);
+  }, [noteId, notes, storeTags, editor, currentUser?.id]);
 
   // 监听 loading 状态变化
   useEffect(() => {
@@ -248,6 +331,46 @@ export default function NoteDetailPage() {
     setOfflineSaving(false);
     setOfflineSaved(false);
   }, [noteId]);
+
+  // 初始化 Yjs 连接（按照 Plate.js 官方文档）
+  const mounted = useMounted();
+ 
+  useEffect(() => {
+    // 确保组件已挂载且编辑器已就绪
+    if (!mounted) return;
+    
+    // 只在编辑现有笔记时启用协同
+    if (!noteId) {
+      console.log('⚠️ 新建笔记模式，暂不启用协同编辑');
+      // 重置初始化标记
+      yjsInitializedRef.current = null;
+      return;
+    }
+    
+    // 🔑 关键修复：如果已经为当前笔记初始化过 Yjs，跳过重复初始化
+    if (yjsInitializedRef.current === noteId) {
+      console.log('✅ Yjs 已为当前笔记初始化，跳过重复初始化');
+      return;
+    }
+ 
+    console.log('🔄 初始化 Yjs 协同编辑连接...', noteId);
+    
+    // 初始化 Yjs 连接、同步文档并设置初始编辑器状态
+    editor.getApi(YjsPlugin).yjs.init({
+      id: `note-${noteId}`,          // Yjs 文档的唯一标识符
+      value: editor.children,         // 如果 Y.Doc 为空时的初始内容
+    });
+    
+    // 标记当前笔记已初始化
+    yjsInitializedRef.current = noteId;
+ 
+    // 清理：组件卸载或笔记切换时销毁连接
+    return () => {
+      console.log('🔌 断开 Yjs 连接...', noteId);
+      editor.getApi(YjsPlugin).yjs.destroy();
+      yjsInitializedRef.current = null;
+    };
+  }, [editor, mounted, noteId]);
 
   // Transform store tags into display format with "全部标签" at the beginning
   const displayTags = useMemo(() => {
@@ -422,11 +545,21 @@ export default function NoteDetailPage() {
       </div>
 
       <NetworkStatusBanner />
+      
+      {/* 协作模式提示 */}
+      {isSharedNote && (
+        <div className="flex items-center gap-2 mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <Users className="w-5 h-5 text-blue-600" />
+          <span className="text-sm text-blue-700 font-medium">
+            协作模式 - 来自 {noteOwnerName} 的分享
+          </span>
+        </div>
+      )}
 
       <Plate editor={editor} onChange={handleEditorChange}>      {/* 提供编辑器上下文 */}
         <FixedToolbar className="relative flex justify-start gap-1 w-fit">
           {/* Tag Selector */}
-          <Select value={selectedTag} onValueChange={handleTagChange}>
+          {!isSharedNote && (<Select value={selectedTag} onValueChange={handleTagChange}>
             <SelectTrigger className="w-[120px] h-9 border-gray-200 bg-white hover:bg-gray-50">
               <SelectValue placeholder="全部标签" />
             </SelectTrigger>
@@ -452,7 +585,7 @@ export default function NoteDetailPage() {
               ))}
               <SelectItem value="new">+ 新建</SelectItem>
             </SelectContent>
-          </Select>
+          </Select>)}
 
           <ToolbarButton onClick={() => editor.undo()}>
             <Undo className="w-5 h-5" />
@@ -484,7 +617,9 @@ export default function NoteDetailPage() {
           <TodoListToolbarButton />
           <ToggleToolbarButton />
           <LinkToolbarButton />
-          <ToolbarButton
+          
+          {!isSharedNote && (
+            <ToolbarButton
             tooltip="清除内容"
             className="bg-gray-100 hover:bg-gray-200"
             onClick={() => {
@@ -493,10 +628,12 @@ export default function NoteDetailPage() {
             }}
           >
             <Eraser className="w-5 h-5 text-gray-700" />
-          </ToolbarButton>
+          </ToolbarButton>)}
+
+          {/* {!isSharedNote && (
           <ToolbarButton tooltip="删除" className="bg-red-100 hover:bg-red-200">
             <Trash2 className="w-5 h-5 text-red-600" />
-          </ToolbarButton>
+          </ToolbarButton>)} */}
         </FixedToolbar>
         
         {/* 最近修改时间提示 - 绝对定位在工具栏下方 */}
@@ -518,10 +655,7 @@ export default function NoteDetailPage() {
             ) : (
               <>
                 最近修改：
-                {noteId && notes.length > 0 && (() => {
-                  const currentNote = notes.find(n => n.id === noteId);
-                  return currentNote?.updated_at ? formatRelativeTime(currentNote.updated_at) : '';
-                })()}
+                {updatedAt}
               </>
             )}
           </span>
@@ -534,7 +668,10 @@ export default function NoteDetailPage() {
             value={noteTitle}
             onChange={(e) => setNoteTitle(e.target.value)}
             placeholder="请输入标题"
-            className="w-full text-2xl font-bold border-none outline-none focus:outline-none placeholder:text-gray-300 bg-transparent mb-5 mt-5"
+            readOnly={isSharedNote}
+            className={`w-full text-2xl font-bold border-none outline-none focus:outline-none placeholder:text-gray-300 bg-transparent mb-5 mt-5 ${
+              isSharedNote ? 'cursor-not-allowed opacity-70' : ''
+            }`}
           />
         </div>
         

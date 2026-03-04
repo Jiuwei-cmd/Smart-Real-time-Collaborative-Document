@@ -359,7 +359,7 @@ export async function updateNote(params: UpdateNoteParams): Promise<Note> {
     .from('notes')
     .update(updateData)
     .eq('id', noteId)
-    .eq('user_id', userId) // 确保只能更新自己的笔记
+    // .eq('user_id', userId) // 确保只能更新自己的笔记
     .select()
     .single();
 
