@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Server } = require('@hocuspocus/server');
 
 const server = new Server({
