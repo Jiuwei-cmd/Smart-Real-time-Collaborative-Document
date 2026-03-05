@@ -19,6 +19,8 @@ export interface Message {
   sender_id: string;
   receiver_id: string;
   content: string;
+  content_type: 'text' | 'image' | 'voice'; // 消息类型
+  images?: string[]; // 图片 URL 数组（content_type='image' 时使用）
   created_at: string;
   is_read: boolean;
 }
@@ -428,16 +430,24 @@ export async function getUserById(userId: string): Promise<UserProfile | null> {
 export async function sendMessage(
   senderId: string,
   receiverId: string,
-  content: string
+  content: string,
+  contentType: 'text' | 'image' | 'voice' = 'text',
+  images?: string[]
 ) {
   const supabase = createClientSupabaseClient();
+
+  // 图片消息：将图片 URL 数组序列化到 content，不需要额外加列
+  const finalContent = contentType === 'image' && images && images.length > 0
+    ? JSON.stringify(images)
+    : content.trim();
 
   const { error } = await supabase
     .from('messages')
     .insert({
       sender_id: senderId,
       receiver_id: receiverId,
-      content: content.trim()
+      content: finalContent,
+      content_type: contentType,
     });
 
   if (error) {

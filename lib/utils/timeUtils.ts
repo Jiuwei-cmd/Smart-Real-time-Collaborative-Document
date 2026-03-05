@@ -2,8 +2,11 @@
  * 将 Supabase 的 UTC timestamp 转换为北京时间
  */
 export function utcToBeijingTime(dateString: string): Date {
-  // Supabase timestamp 是 UTC 时间，需要加 'Z' 标识
-  const utcDate = new Date(dateString + 'Z');
+  // 检查是否已经包含时区标识（Z 或者形如 +00:00）
+  const hasTimeZone = dateString.endsWith('Z') || dateString.includes('+');
+  const normalizedString = hasTimeZone ? dateString : dateString + 'Z';
+  
+  const utcDate = new Date(normalizedString);
   
   // 加上 8 小时转换为北京时间
   const beijingDate = new Date(utcDate.getTime() + 8 * 60 * 60 * 1000);
@@ -64,4 +67,52 @@ export function formatDateTime(dateString: string): string {
   const minute = String(beijingDate.getUTCMinutes()).padStart(2, '0');
   
   return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+/**
+ * 格式化聊天消息时间（仿微信/QQ对话规范）
+ * - 今天：14:30
+ * - 昨天：昨天 14:30
+ * - 近7天：星期三 14:30
+ * - 今年：04-05 14:30
+ * - 跨年：2023-04-05 14:30
+ */
+export function formatChatMessageTime(dateString: string): string {
+  if (!dateString) return '';
+  const date = utcToBeijingTime(dateString);
+  const now = new Date();
+  
+  // 以当前浏览器时区（或者直接假定我们在通过 utcToBeijingTime 转好的绝对时间下进行比对）
+  // 注意：utcToBeijingTime 返回的 Date 对象其实把北京时间当作了本地时区的时间值。
+  // 为了确保"天"的比较准确，我们需要把 now 也偏移到北京时间（同前面的逻辑一样）
+  const nowBeijing = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  
+  // 取消时分秒，只比较天数
+  const dateDay = new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  const nowDay = new Date(nowBeijing.getUTCFullYear(), nowBeijing.getUTCMonth(), nowBeijing.getUTCDate());
+  
+  const diffDays = Math.floor((nowDay.getTime() - dateDay.getTime()) / (1000 * 60 * 60 * 24));
+  
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  const timeStr = `${hour}:${minute}`;
+  
+  if (diffDays === 0) {
+    return timeStr; // 今天
+  } else if (diffDays === 1) {
+    return `昨天 ${timeStr}`; // 昨天
+  } else if (diffDays > 1 && diffDays < 7) {
+    // 星期几
+    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    const weekday = weekdays[date.getUTCDay()];
+    return `${weekday} ${timeStr}`;
+  } else {
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    if (date.getUTCFullYear() === nowBeijing.getUTCFullYear()) {
+      return `${month}-${day} ${timeStr}`; // 同一年
+    } else {
+      return `${date.getUTCFullYear()}-${month}-${day} ${timeStr}`; // 跨年
+    }
+  }
 }

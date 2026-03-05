@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { ThemeToggle } from '@/components/editor/plugins/ThemeToggle';
 import { createClientSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { Settings, LogOut, Bell, MessageCircle, UserPlus, Smile, Scissors } from 'lucide-react';
+import { Settings, LogOut, Bell, MessageCircle, UserPlus, Smile, Scissors, ImagePlus, Mic } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +28,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog"
+import { VoiceMessageBubble } from '@/components/ui/VoiceMessageBubble';
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 
@@ -45,7 +47,9 @@ import { createPortal } from 'react-dom';
 import { DrawingCanvas } from '@/components/ui/DrawingCanvas';
 // import html2canvas from 'html2canvas';
 import { domToCanvas } from 'modern-screenshot';
-import { env } from 'process';
+import { uploadImage } from '@/lib/utils/uploadImage';
+import { uploadVoice } from '@/lib/utils/uploadVoice';
+import { formatChatMessageTime } from '@/lib/utils/timeUtils';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -79,7 +83,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   
   // 文字提取结果弹窗状态
   const [isTextExtractDialogOpen, setIsTextExtractDialogOpen] = useState(false);
-  const [extractedImage, setExtractedImage] = useState<string>('');
+  const [extractedImage, setExtractedImage] = useState<string>(''); // 提取文字对话框专用
+  const [chatImages, setChatImages] = useState<string[]>([]); // 聊天框截图/图片预览（最多5张）
+  const [isVoiceMode, setIsVoiceMode] = useState(false); // 语音消息模式
+  const [isRecording, setIsRecording] = useState(false); // 录音中
+  const [recordingSeconds, setRecordingSeconds] = useState(0); // 已录音秒数
   const [extractedText, setExtractedText] = useState<string>('');
   const [isExtracting, setIsExtracting] = useState(false);
   
@@ -106,6 +114,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     fetchUserProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 录音计时器：每秒 +1，到 60 秒自动停止
+  useEffect(() => {
+    if (!isRecording) return;
+    const timer = setInterval(() => {
+      setRecordingSeconds((prev) => {
+        if (prev >= 59) {
+          setIsRecording(false);
+          clearInterval(timer);
+          return 0;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isRecording]);
 
   // 获取好友请求
   useEffect(() => {
@@ -215,18 +239,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const unsubscribe = subscribeAllMessages(profile.id, async (newMessage) => {
       // 只在抽屉关闭时显示通知
       if (!isChatDrawerOpen) {
+        // 根据 content_type 决定通知内容
+        let displayContent = newMessage.content;
+        if (newMessage.content_type === 'image') displayContent = '[图片]';
+        if (newMessage.content_type === 'voice') displayContent = '[语音]';
+
         try {
           // 获取发送者信息
           const sender = await getUserById(newMessage.sender_id);
           toast.info('新消息', {
-            description: `${sender?.nickname || '好友'}: ${newMessage.content}`,
+            description: `${sender?.nickname || '好友'}: ${displayContent}`,
             duration: 5000,
           });
         } catch (error) {
           console.error('获取发送者信息失败:', error);
           // 如果获取失败，仍然显示消息通知
           toast.info('新消息', {
-            description: newMessage.content,
+            description: displayContent,
             duration: 5000,
           });
         }
@@ -348,23 +377,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // 发送消息
   const handleSendMessage = async () => {
-    if (!profile?.id || !selectedFriend || !messageInput.trim()) return;
+    if (!profile?.id || !selectedFriend) return;
+    if (!messageInput.trim() && chatImages.length === 0) return;
+
+    const hasImages = chatImages.length > 0;
+    const contentType = hasImages ? 'image' : 'text';
+    const contentToSend = messageInput.trim() || (hasImages ? '[图片]' : '');
 
     try {
-      await sendMessage(profile.id, selectedFriend, messageInput);
-      // 添加到本地消息列表（乐观更新）
+      await sendMessage(
+        profile.id,
+        selectedFriend,
+        contentToSend,
+        contentType,
+        hasImages ? chatImages : undefined
+      );
+      // 乐观更新本地消息列表
+      const localContent = hasImages ? JSON.stringify(chatImages) : contentToSend;
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now().toString(), // 临时ID
+          id: Date.now().toString(),
           sender_id: profile.id,
           receiver_id: selectedFriend,
-          content: messageInput,
+          content: localContent,
+          content_type: contentType,
           created_at: new Date().toISOString(),
           is_read: false,
         },
       ]);
-      setMessageInput(''); // 清空输入框
+      setMessageInput('');
+      setChatImages([]);
     } catch (error) {
       console.error('发送消息失败:', error);
       toast.error('发送失败', {
@@ -377,6 +420,80 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const onClickLogout = async () => {
     await supabase.auth.signOut();
     router.push('/auth');
+  };
+
+  // 麦克风音频流 ref
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]); // 存放录音分段数据
+
+  // 录音开关
+  const handleToggleRecording = async () => {
+    if (isRecording) {
+
+      // 触发 MediaRecorder 的停止（这会触发 onstop 事件）
+      mediaRecorderRef.current?.stop();
+      // 停止录音：关闭音频流释放麦克
+      audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+      audioStreamRef.current = null;
+      setIsRecording(false);
+      setRecordingSeconds(0);
+    } else {
+      // 开始录音：获取麦克权限和音频流
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+        chunksRef.current = []; // 开始前清空旧数据
+
+        // 2. 初始化 MediaRecorder
+        const recorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = recorder;
+
+        // 3. 监听数据可用事件（录音块产生时存入 chunksRef）
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        };
+
+        // 监听停止事件：合成音频并上传到 Supabase
+        recorder.onstop = async () => {
+          const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+          try {
+            const publicUrl = await uploadVoice(audioBlob, profile?.id || 'anonymous');
+            console.log('录音上传成功，公开 URL:', publicUrl);
+            // 发送语音消息
+            if (profile?.id && selectedFriend) {
+              await sendMessage(profile.id, selectedFriend, publicUrl, 'voice');
+              // 乐观更新
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: Date.now().toString(),
+                  sender_id: profile.id,
+                  receiver_id: selectedFriend,
+                  content: publicUrl,
+                  content_type: 'voice',
+                  created_at: new Date().toISOString(),
+                  is_read: false,
+                },
+              ]);
+            }
+          } catch (uploadErr) {
+            console.error('录音上传失败:', uploadErr);
+            toast.error('语音上传失败，请重试');
+          }
+        };
+        
+        // 4. 开始录音
+        recorder.start();
+        setIsRecording(true);
+        setRecordingSeconds(0);
+      } catch (err) {
+        console.error('获取麦克权限失败:', err);
+        toast.error('无法访问麦克风', {
+          description: '请允许浏览器访问麦克风权限',
+        });
+      }
+    }
   };
 
   // 1. 开始截图模式
@@ -493,8 +610,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
   }, [isSelecting, showControls, isDrawingEnabled]); // 添加所有在 effect 中使用的状态
 
-  // ========== 公共方法：截取选区，返回 { dataUrl, base64 } ==========
-  const captureSelectedArea = async (): Promise<{ dataUrl: string; base64: string } | null> => {
+  // ========== 公共方法：截取选区，返回 { dataUrl, base64, blob } ==========
+  const captureSelectedArea = async (): Promise<{ dataUrl: string; base64: string; blob: Blob | null } | null> => {
     // 1. 先保存画笔涂鸦层（必须在 setShowControls(false) 之前，否则组件卸载后拿不到）
     const drawingCanvas = document.querySelector<HTMLCanvasElement>('[data-drawing-canvas="true"]');
     const savedDrawingCanvas = document.createElement('canvas');
@@ -538,19 +655,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     const dataUrl = croppedCanvas.toDataURL('image/png');
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-    return { dataUrl, base64 };
+    const blob = await new Promise<Blob | null>((resolve) => {
+      croppedCanvas.toBlob((b) => resolve(b), 'image/png');
+    });
+    return { dataUrl, base64, blob };
   };
 
-  // ========== 完成截图：截取选区并下载 ==========
+  // ========== 完成截图：发送到聊天框 ==========
   const handleSaveScreenshot = async (e: React.MouseEvent) => {
     e.stopPropagation();
     try {
       const result = await captureSelectedArea();
       if (result) {
-        const link = document.createElement('a');
-        link.href = result.dataUrl;
-        link.download = `screenshot_${Date.now()}.png`;
-        link.click();
+        if (chatImages.length >= 5) {
+          toast.warning('最多只能添加 5 张截图');
+        } else {
+          // 上传到 Supabase storage，存公开 URL
+          let imageUrl = result.dataUrl; // 兜底仍用 dataUrl
+          if (result.blob) {
+            try {
+              imageUrl = await uploadImage(result.blob, profile?.id || 'anonymous', 'screenshot');
+            } catch (uploadErr) {
+              console.error('截图上传失败，回退到 dataUrl:', uploadErr);
+              toast.warning('图片上传失败，使用本地预览');
+            }
+          }
+          setChatImages((prev) => [...prev, imageUrl]);
+        }
+        setIsChatDrawerOpen(true);
       }
     } catch (error) {
       console.error('截图失败:', error);
@@ -585,11 +717,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setShowControls(false);
       setDrawingColor('#ff0000');
 
-      // 3. 调用 API 获取文字
+      // 3. 上传图片并调用 API 获取文字
+      let imageUrl = null;
+      if (result.blob) {
+        try {
+          imageUrl = await uploadImage(result.blob, profile?.id || 'anonymous');
+        } catch (uploadError) {
+          console.error('上传图片失败, 回退到 base64:', uploadError);
+        }
+      }
+
       const response = await fetch('/api/recognize-text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64Data: result.base64 }),
+        body: JSON.stringify({ 
+          base64Data: imageUrl ? undefined : result.base64,
+          imageUrl: imageUrl || undefined 
+        }),
       });
       if (!response.ok) {
         const err = await response.json();
@@ -1171,12 +1315,36 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                       : 'bg-accent'
                                   }`}
                                 >
-                                  <p className="text-sm">{msg.content}</p>
+                                  {/* 根据 content_type 渲染不同内容 */}
+                                  {msg.content_type === 'image' ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {(() => {
+                                        try {
+                                          const urls: string[] = JSON.parse(msg.content);
+                                          return urls.map((url, i) => (
+                                            <img
+                                              key={i}
+                                              src={url}
+                                              alt={`图片 ${i + 1}`}
+                                              className="max-h-40 max-w-[160px] rounded object-contain cursor-zoom-in"
+                                              onClick={() => window.open(url, '_blank')}
+                                            />
+                                          ));
+                                        } catch {
+                                          return <p className="text-sm">{msg.content}</p>;
+                                        }
+                                      })()}
+                                    </div>
+                                  ) : msg.content_type === 'voice' ? (
+                                    <VoiceMessageBubble
+                                      src={msg.content}
+                                      isSelf={msg.sender_id === profile?.id}
+                                    />
+                                  ) : (
+                                    <p className="text-sm">{msg.content}</p>
+                                  )}
                                   <span className={`text-xs ${msg.sender_id === profile?.id ? 'opacity-80' : 'text-muted-foreground'}`}>
-                                    {new Date(msg.created_at).toLocaleTimeString('zh-CN', {
-                                      hour: '2-digit',
-                                      minute: '2-digit'
-                                    })}
+                                    {formatChatMessageTime(msg.created_at)}
                                   </span>
                                 </div>
                               </div>
@@ -1230,38 +1398,182 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                           >
                             <Scissors className="h-5 w-5 text-muted-foreground hover:text-foreground" />
                           </button>
+
+                          {/* 上传图片按钮 */}
+                          <button
+                            type="button"
+                            onClick={() => document.getElementById('chat-image-upload')?.click()}
+                            className="p-2 rounded-lg hover:bg-accent transition-colors"
+                            title="上传图片"
+                          >
+                              <ImagePlus className="h-5 w-5 text-muted-foreground hover:text-foreground" />
+                          </button>
+                          <input
+                            id="chat-image-upload"
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={async (e) => {
+                              const files = Array.from(e.target.files || []);
+                              if (!files.length) return;
+
+                              // 检查剩余可添加数量
+                              const remaining = 5 - chatImages.length;
+                              if (remaining <= 0) {
+                                toast.warning('最多只能添加 5 张图片');
+                                e.target.value = '';
+                                return;
+                              }
+                              const toUpload = files.slice(0, remaining);
+                              if (files.length > remaining) {
+                                toast.warning(`只上传前 ${remaining} 张，已达上限`);
+                              }
+                              try {
+                                const urls = await Promise.all(
+                                  toUpload.map((file) =>
+                                    uploadImage(file, profile?.id || 'anonymous')
+                                  )
+                                );
+                                setChatImages((prev) => [...prev, ...urls]);
+                              } catch (err) {
+                                console.error('上传图片失败:', err);
+                                toast.error('上传图片失败，请重试');
+                              } finally {
+                                e.target.value = ''; // 重置 input，允许再次选择相同文件
+                              }
+                            }}
+                          />
+
+                          {/* 语音消息按钮 */}
+                          <button
+                            type="button"
+                            onClick={() => setIsVoiceMode((v) => !v)}
+                            className={`p-2 rounded-lg hover:bg-accent transition-colors ${isVoiceMode ? 'bg-accent text-primary' : ''}`}
+                            title="发送语音"
+                          >
+                            <Mic className={`h-5 w-5 transition-colors ${isVoiceMode ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`} />
+                          </button>
                           
                           {/* 右侧占位符，用于后续添加更多工具 */}
                           <div className="flex-1"></div>
                         </div>
                         
-                        {/* 输入框 */}
-                        <div className="px-1">
-                          <textarea 
-                            placeholder="输入消息..." 
-                            value={messageInput}
-                            onChange={(e) => setMessageInput(e.target.value)}
-                            onKeyPress={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSendMessage();
-                              }
-                            }}
-                            rows={3}
-                            className="w-full px-3 py-2 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring text-sm resize-none"
-                          />
-                        </div>
-                        
-                        {/* 发送按钮 */}
+                        {/* 输入框 / 语音模式 */}
+                        {isVoiceMode ? (
+                          /* 语音模式 UI */
+                          <div className="flex flex-col items-center justify-center py-6 gap-3">
+                            {/* 计时器：仅录音时显示 */}
+                            {isRecording && (
+                              <span className="text-sm font-mono tabular-nums text-primary font-semibold">
+                                {`${String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:${String(recordingSeconds % 60).padStart(2, '0')}`}
+                              </span>
+                            )}
+
+                            {/* 麦克风按钮 */}
+                            <div className="relative flex items-center justify-center">
+                              {/* 录音中的脉冲圆环（缩小版） */}
+                              {isRecording && (
+                                <>
+                                  <span className="absolute w-[68px] h-[68px] rounded-full bg-primary/30 animate-ping" />
+                                  <span className="absolute w-[76px] h-[76px] rounded-full bg-primary/15 animate-ping [animation-delay:0.4s]" />
+                                </>
+                              )}
+                              <button
+                                type="button"
+                                onClick={handleToggleRecording}
+                                className="relative w-16 h-16 rounded-full bg-primary hover:bg-primary/90 flex items-center justify-center shadow-lg active:scale-95 transition-all"
+                                title={isRecording ? '点击停止录音' : '点击开始录音'}
+                              >
+                                <Mic className={`h-7 w-7 text-primary-foreground transition-transform ${
+                                  isRecording ? 'scale-110' : ''
+                                }`} />
+                              </button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              点击话筒开始说话，按 Esc 键或点击
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsVoiceMode(false);
+                                  setIsRecording(false);
+                                  setRecordingSeconds(0);
+                                }}
+                                className="text-primary underline ml-1 hover:text-primary/80"
+                              >
+                                退出
+                              </button>
+                            </p>
+                          </div>
+                        ) : (
+                          /* 正常输入框 / 图片预览 */
+                          <div className="px-1">
+                            {/* 截图预览区域（有图时替代文本框显示） */}
+                            {chatImages.length > 0 ? (
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {chatImages.map((imgSrc, idx) => (
+                                  <div key={idx} className="relative inline-block group">
+                                    <Dialog>
+                                      <DialogTrigger asChild>
+                                        <img
+                                          src={imgSrc}
+                                          alt={`截图预览 ${idx + 1}`}
+                                          className="max-h-28 max-w-[120px] rounded-md object-contain border border-border cursor-zoom-in hover:opacity-90 transition-opacity"
+                                        />
+                                      </DialogTrigger>
+                                      <DialogContent className="max-w-4xl w-[90vw] flex items-center justify-center bg-background/95 p-4">
+                                        <img
+                                          src={imgSrc}
+                                          alt={`截图放大 ${idx + 1}`}
+                                          className="max-h-[80vh] max-w-full rounded-lg object-contain"
+                                        />
+                                      </DialogContent>
+                                    </Dialog>
+                                    <button
+                                      onClick={() => setChatImages((prev) => prev.filter((_, i) => i !== idx))}
+                                      className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                      title="移除图片"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                                    </button>
+                                  </div>
+                                ))}
+                                {chatImages.length < 5 && (
+                                  <span className="text-xs text-muted-foreground self-end pb-1">
+                                    {chatImages.length}/5 张
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <textarea
+                                placeholder="输入消息..."
+                                value={messageInput}
+                                onChange={(e) => setMessageInput(e.target.value)}
+                                onKeyPress={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSendMessage();
+                                  }
+                                }}
+                                rows={3}
+                                className="w-full px-3 py-2 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-ring text-sm resize-none"
+                              />
+                            )}
+                          </div>
+                        )}
+
+                        {/* 发送按钮（语音模式下隐藏） */}
+                        {!isVoiceMode && (
                         <div className="flex justify-end px-1 pb-2 pt-2">
-                          <button 
+                          <button
                             onClick={handleSendMessage}
-                            disabled={!messageInput.trim()}
+                            disabled={!messageInput.trim() && chatImages.length === 0}
                             className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                           >
                             发送
                           </button>
                         </div>
+                        )}
                       </div>
                     </div>
                   );
