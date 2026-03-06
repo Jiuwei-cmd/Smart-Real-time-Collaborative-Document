@@ -11,16 +11,17 @@ export function isChinese(str: string): boolean {
 }
 
 /**
- * 生成中文关键词的所有可能子串（2-4字）
- * 用于处理连续的中文关键词，如"人工智能机器人" -> ["人工", "工智", "智能", ..., "人工智能", ...]
+ * 生成中文关键词的所有可能子串（1-10字）
+ * 用于处理连续的中文关键词，如"人工智能机器人" -> ["人工", "智能", "人", "工", ...]
  */
 export function generateChineseSubstrings(keyword: string): string[] {
-  if (keyword.length < 2) return [keyword];
+  if (keyword.length < 1) return [];
   
   const substrings = new Set<string>();
   
-  // 生成2-4字的子串，优先长度更长的
-  for (let len = Math.min(4, keyword.length); len >= 2; len--) {
+  // 生成1-10字的子串，优先长度更长的
+  const maxLen = Math.min(10, keyword.length);
+  for (let len = maxLen; len >= 1; len--) {
     for (let i = 0; i <= keyword.length - len; i++) {
       substrings.add(keyword.substring(i, i + len));
     }
@@ -60,11 +61,15 @@ export function smartTokenize(keyword: string): string[] {
     }
   }
   
-  // 使用正则提取所有连续的字母和数字片段
+  // 使用正则提取所有连续的字母、数字和中文片段
   const segments = keyword.match(/[a-zA-Z]+|[0-9]+|[\u4e00-\u9fa5]+/g) || [];
   segments.forEach(seg => {
     if (seg.length > 0) {
       tokens.add(seg);
+      // 如果是中文片段，提取所有可能的子串
+      if (isChinese(seg)) {
+        generateChineseSubstrings(seg).forEach(sub => tokens.add(sub));
+      }
     }
   });
   
@@ -81,28 +86,11 @@ export function tokenizeSearchKeyword(searchKeyword: string): string[] {
     return [];
   }
 
-  let keywords: string[] = [];
-  
-  // 检查是否包含空格
-  if (searchKeyword.includes(' ')) {
-    // 按空格分割
-    keywords = searchKeyword
-      .trim()
-      .split(/\s+/)
-      .filter(k => k.length > 0)
-      .flatMap(k => smartTokenize(k)); // 对每个词进行智能分词
-  } else {
-    // 无空格的情况
-    const trimmed = searchKeyword.trim();
-    
-    // 如果是中文且长度大于4，使用滑动窗口生成子串
-    if (isChinese(trimmed) && trimmed.length > 4) {
-      keywords = generateChineseSubstrings(trimmed);
-    } else {
-      // 使用智能分词
-      keywords = smartTokenize(trimmed);
-    }
-  }
+  const keywords = searchKeyword
+    .trim()
+    .split(/\s+/)
+    .filter(k => k.length > 0)
+    .flatMap(k => smartTokenize(k));
 
   // 按长度降序排序，优先匹配长词
   keywords.sort((a, b) => b.length - a.length);
