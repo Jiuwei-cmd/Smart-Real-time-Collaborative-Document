@@ -29,12 +29,10 @@ export class SyncService {
    */
   async sync() {
     if (this.isSyncing) {
-      console.log('⏳ 同步正在进行中，跳过本次同步');
       return { success: false, message: '同步正在进行中' };
     }
 
     this.isSyncing = true;
-    console.log('🔄 开始同步本地数据到云端...');
 
     try {
       // 1. 获取待同步的笔记
@@ -46,14 +44,13 @@ export class SyncService {
 
       for (const note of pendingNotes) {
         try {
-          console.log(`🔄 正在同步笔记: ${note.id}`);
           
           // 解析笔记内容
           let editorContent;
           try {
             editorContent = JSON.parse(note.content);
           } catch (error) {
-            console.error(`❌ 解析笔记内容失败 (${note.id}):`, error);
+            console.error(`解析笔记内容失败 (${note.id}):`, error);
             continue;
           }
 
@@ -64,28 +61,25 @@ export class SyncService {
             // 更新本地同步状态
             await dbHelpers.updateNoteSyncStatus(note.id, 'synced');
             syncedCount++;
-            console.log(`✅ 笔记同步成功: ${note.id}`);
           } else {
-            console.error(`❌ 同步笔记失败 (${note.id}):`, result.error);
+            console.error(`同步笔记失败 (${note.id}):`, result.error);
           }
         } catch (error) {
-          console.error(`❌ 同步笔记时出错 (${note.id}):`, error);
+          console.error(`同步笔记时出错 (${note.id}):`, error);
         }
       }
 
       const totalSynced = syncedCount;
       if (totalSynced > 0) {
-        console.log(`✅ 同步完成: ${syncedCount} 条笔记`);
         toast.success(`数据同步成功`, {
           description: `已同步 ${totalSynced} 项更改到云端`
         });
       } else {
-        console.log('✅ 同步完成，没有待同步数据');
+        console.log('同步完成，没有待同步数据');
       }
 
       return { success: true, syncedCount };
     } catch (error) {
-      console.error('❌ 同步失败:', error);
       toast.error('数据同步失败', {
         description: '请检查网络连接后重试'
       });

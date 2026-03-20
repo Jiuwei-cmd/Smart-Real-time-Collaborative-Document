@@ -68,16 +68,11 @@ export const dbHelpers = {
         offline_modified_at: isPending ? new Date().toISOString() : undefined,
         last_sync_at: !isPending ? new Date().toISOString() : undefined
       });
-      console.log(`✅ ${isPending ? '离线编辑' : '缓存'}笔记已保存: ${note.id}`);
       return { success: true };
     } catch (error) {
-      console.error('❌ 保存笔记失败:', error);
       return { success: false, error };
     }
   },
-
-
-
   /**
    * 获取所有待同步的笔记（sync_status === 'pending'）
    */
@@ -89,7 +84,6 @@ export const dbHelpers = {
       
       return { success: true, notes };
     } catch (error) {
-      console.error('❌ 获取待同步笔记失败:', error);
       return { success: false, error, notes: [] };
     }
   },
@@ -105,25 +99,9 @@ export const dbHelpers = {
         sync_status: syncStatus,
         last_sync_at: syncStatus === 'synced' ? new Date().toISOString() : undefined
       });
-      console.log(`✅ 更新笔记同步状态: ${noteId} -> ${syncStatus}`);
       return { success: true };
     } catch (error) {
-      console.error('❌ 更新笔记同步状态失败:', error);
       return { success: false, error };
     }
   },
-
-  /**
-   * 清空所有本地数据 (谨慎使用)
-   */
-  async clearAllLocalData() {
-    try {
-      await localDB.notes.clear();
-      console.log('✅ 已清空所有本地数据');
-      return { success: true };
-    } catch (error) {
-      console.error('❌ 清空本地数据失败:', error);
-      return { success: false, error };
-    }
-  }
 };

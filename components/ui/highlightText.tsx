@@ -54,24 +54,3 @@ export function highlightText(text: string, searchKeyword: string): React.ReactN
     return part;
   }).filter(Boolean);
 }
-
-/**
- * 检查文本是否包含搜索关键词
- * @param text - 要检查的文本
- * @param searchKeyword - 搜索关键词
- * @returns 是否包含关键词
- */
-export function containsKeyword(text: string, searchKeyword: string): boolean {
-  if (!searchKeyword || !searchKeyword.trim()) {
-    return false;
-  }
-
-  const keywords = searchKeyword
-    .trim()
-    .split(/\s+/)
-    .filter(k => k.length > 0);
-
-  return keywords.some(keyword =>
-    text.toLowerCase().includes(keyword.toLowerCase())
-  );
-}

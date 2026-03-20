@@ -98,7 +98,6 @@ export default function NoteDetailPage() {
   const searchParams = useSearchParams();
   const noteId = searchParams.get('id'); // 如果是新建笔记，id 为 null；如果是编辑，id 为笔记ID
   const noteOwnerName = searchParams.get('ownerName'); // 从URL获取所有者名称
-  const noteOwnerId = searchParams.get('ownerId'); // 从URL获取所有者ID
   
   const router = useRouter();
   const lowlight = createLowlight(all);
@@ -434,10 +433,7 @@ export default function NoteDetailPage() {
   const debouncedAutoSave = useMemo(
     () => debounce(async () => {
       // 如果标题为空，不自动保存
-      if (!noteTitle.trim()) {
-        console.log('标题为空，跳过自动保存');
-        return;
-      }
+      if (!noteTitle.trim()) return
       
       // 获取编辑器内容
       const editorContent = editor.children;

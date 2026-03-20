@@ -16,8 +16,6 @@ export function usePresence(userId: string | undefined) {
   useEffect(() => {
     if (!userId) return;
 
-    console.log('🔌 初始化 Presence 订阅');
-
     // 订阅 presence
     const unsubscribe = subscribePresence(userId, (users) => {
       setOnlineUsers(users);
@@ -25,7 +23,6 @@ export function usePresence(userId: string | undefined) {
 
     // 清理函数
     return () => {
-      console.log('🔌 清理 Presence 订阅');
       unsubscribe();
     };
   }, [userId]);

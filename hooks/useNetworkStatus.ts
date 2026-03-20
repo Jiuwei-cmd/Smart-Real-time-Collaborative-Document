@@ -19,25 +19,9 @@ export const useNetworkStatus = () => {
     // 仅在客户端运行
     if (typeof window === 'undefined') return;
 
-    /**
-     * 网络恢复在线的处理函数
-     */
-    const handleOnline = () => {
-      console.log('🌐 网络已恢复在线');
-      setIsOnline(true);
-    };
-
-    /**
-     * 网络离线的处理函数
-     */
-    const handleOffline = () => {
-      console.log('📴 网络已离线');
-      setIsOnline(false);
-    };
-
     // 监听浏览器原生的在线/离线事件
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', () => {setIsOnline(true)});
+    window.addEventListener('offline', () => {setIsOnline(false)});
 
     // 可选：定期心跳检测，验证真实网络连接状态
     // 因为 navigator.onLine 有时不准确（如连接到无互联网的WiFi）
@@ -66,8 +50,8 @@ export const useNetworkStatus = () => {
 
     // 清理函数
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', () => {setIsOnline(true)});
+      window.removeEventListener('offline', () => {setIsOnline(false)});
       clearInterval(heartbeatInterval);
     };
   }, [isOnline]);

@@ -48,19 +48,17 @@ export function subscribePresence(
           }
         });
       });
-      
-      console.log('📊 在线用户数:', onlineUserIds.size);
       onPresenceChange(onlineUserIds);
     })
     .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-      console.log('✅ 用户上线:', key, newPresences);
+      console.log('用户上线:', key, newPresences);
     })
     .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-      console.log('❌ 用户离线:', key, leftPresences);
+      console.log('用户离线:', key, leftPresences);
     })
     .subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        console.log('🔌 Presence channel 已连接');
+        console.log('Presence channel 已连接');
         
         // 广播自己上线
         const presenceTrackStatus = await channel.track({
