@@ -1,7 +1,7 @@
 'use client';
 // app/dashboard/page.tsx
 import { Button } from '@/components/ui/button';
-import { Plus, Search, EditIcon, RotateCcw, X, Trash2, CheckSquare } from 'lucide-react';
+import { Plus, Search, EditIcon, RotateCcw, X, Trash2, CheckSquare, Sparkle } from 'lucide-react';
 import { Spinner } from "@/components/ui/spinner"
 import Link from 'next/link';
 import { useState, useEffect, useMemo, useRef } from 'react';
@@ -515,6 +515,27 @@ export default function DashboardHomePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* AI 功能图标*/}
+      <div className="fixed bottom-35 right-25 z-50">
+        <button
+          className="relative group w-12 h-12 flex items-center justify-center rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-300"
+          onClick={() => {
+            // 后续逻辑：打开 AI 聊天界面
+            console.log('AI 助手点击');
+          }}
+        >
+          {/* 悬停时的极微弱背景渐变 */}
+          <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-purple-500/5 to-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl"></div>
+          
+          <Sparkle className="w-5 h-5 text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors" />
+          
+          {/* 悬浮提示文字 */}
+          <div className="absolute right-full mr-3 px-2 py-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded text-xs font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-all duration-200 translate-x-1 group-hover:translate-x-0 pointer-events-none">
+            AI 助手
+          </div>
+        </button>
+      </div>
     </div>
   );
 }
