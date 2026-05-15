@@ -372,8 +372,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // 自动滚动到消息列表底部
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    // 在反向布局中，我们只需要在切换好友或打开时确保位置正确
+    // 实际上 flex-col-reverse 会自动处理大部分情况，这里仅作为兜底
+    if (isChatDrawerOpen && selectedFriend) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+    }
+  }, [selectedFriend, isChatDrawerOpen]);
 
   // 发送消息
   const handleSendMessage = async () => {
@@ -1300,10 +1304,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   return (
                     <div className="h-full p-4 flex flex-col">
                       {/* 聊天消息区域 */}
-                      <div className="flex-1 overflow-y-auto space-y-3 mb-4 ">
+                      <div className="flex-1 overflow-y-auto flex flex-col-reverse gap-3 mb-4 px-2 scroll-smooth">
                         {messages.length > 0 ? (
                           <>
-                            {messages.map((msg) => (
+                            {/* 滚动锚点 - 在 flex-col-reverse 中放在最前面即为最底部 */}
+                            <div ref={messagesEndRef} />
+                            {[...messages].reverse().map((msg) => (
                               <div
                                 key={msg.id}
                                 className={`flex ${msg.sender_id === profile?.id ? 'justify-end' : 'justify-start'}`}
@@ -1349,8 +1355,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                 </div>
                               </div>
                             ))}
-                            {/* 滚动锚点 */}
-                            <div ref={messagesEndRef} />
                           </>
                         ) : (
                           <div className="flex items-center justify-center py-8">
