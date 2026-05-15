@@ -7,8 +7,9 @@ import {
   DrawerTitle,
   DrawerDescription,
 } from "@/components/ui/drawer";
-import { Sparkle, PlusCircle, History } from "lucide-react";
+import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useState, useRef, useEffect } from "react";
 
 
 interface AIDrawerProps {
@@ -17,6 +18,18 @@ interface AIDrawerProps {
 }
 
 export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
+  const [inputValue, setInputValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 自动调整高度逻辑
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+    }
+  }, [inputValue]);
+
   return (
     <Drawer open={open} onOpenChange={onOpenChange} direction="right">
       <DrawerContent className="h-full rounded-none border-l shadow-2xl sm:max-w-[1000px] w-[90vw]" drawerWidth="sm:max-w-[1000px]">
@@ -78,11 +91,52 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
               </div>
             </div>
 
-            {/* 底部输入框占位 */}
-            <div className="p-4 border-t bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
-              <div className="w-full h-11 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex items-center px-4 text-sm text-muted-foreground shadow-sm">
-                发送消息给小艺...
+            {/* 底部输入框 - 极简无边框样式 */}
+            <div className="p-4 bg-white dark:bg-zinc-950 shrink-0">
+              <div className="relative bg-zinc-100/60 dark:bg-zinc-900/60 rounded-[24px] transition-all focus-within:bg-zinc-100 dark:focus-within:bg-zinc-900">
+                <div className="p-4 pb-0">
+                  <textarea
+                    ref={textareaRef}
+                    placeholder="深度分析需求并解答，你需要什么帮助？"
+                    className="w-full bg-transparent border-none focus:ring-0 outline-none resize-none text-sm min-h-[40px] max-h-[120px] py-2 placeholder:text-zinc-500 overflow-y-auto transition-[height] duration-100"
+                    rows={1}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                  />
+                </div>
+                
+                <div className="flex items-center justify-between px-3 pb-3">
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
+                      <ScanLine className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
+                      <Mic className="w-4 h-4" />
+                    </Button>
+                    
+                    <Button 
+                      size="icon" 
+                      className={`h-9 w-9 rounded-full transition-all duration-300 ml-1 ${
+                        inputValue.trim() 
+                        ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm" 
+                        : "bg-transparent text-zinc-400 opacity-50 cursor-not-allowed"
+                      }`}
+                      disabled={!inputValue.trim()}
+                    >
+                      <Send className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
               </div>
+              <p className="text-[10px] text-center text-zinc-400 mt-3">
+                AI 助手可能会产生错误，请验证其回答。
+              </p>
             </div>
           </main>
         </div>
