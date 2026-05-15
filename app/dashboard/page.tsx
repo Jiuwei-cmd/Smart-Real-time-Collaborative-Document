@@ -38,6 +38,8 @@ import { useNoteStore } from '@/app/store/useNoteStore';
 import { useSelectedNotesStore } from '@/app/store/useSelectedNotesStore';
 import { toast } from 'sonner';
 import { formatDateTime } from '@/lib/utils/timeUtils';
+import { AIDrawer } from '@/app/components/AIDrawer';
+
 
 
 
@@ -67,6 +69,9 @@ export default function DashboardHomePage() {
 
   // 搜索输入框引用
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // AI 抽屉状态
+  const [isAIDrawerOpen, setIsAIDrawerOpen] = useState(false);
 
   // Fetch tags on component mount
   useEffect(() => {
@@ -521,8 +526,7 @@ export default function DashboardHomePage() {
         <button
           className="relative group w-12 h-12 flex items-center justify-center rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-300"
           onClick={() => {
-            // 后续逻辑：打开 AI 聊天界面
-            console.log('AI 助手点击');
+            setIsAIDrawerOpen(true);
           }}
         >
           {/* 悬停时的极微弱背景渐变 */}
@@ -536,6 +540,8 @@ export default function DashboardHomePage() {
           </div>
         </button>
       </div>
+
+      <AIDrawer open={isAIDrawerOpen} onOpenChange={setIsAIDrawerOpen} />
     </div>
   );
 }
