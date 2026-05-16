@@ -307,7 +307,7 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
                   <div className="p-4 pb-0">
                     <textarea
                       ref={textareaRef}
-                      placeholder="深度分析需求并解答，你需要什么帮助？"
+                      placeholder="您可以询问任何问题， @文档 可以针对文档进行提问"
                       className="w-full bg-transparent border-none focus:ring-0 outline-none resize-none text-sm min-h-[40px] max-h-[120px] py-2 placeholder:text-zinc-500 overflow-y-auto transition-[height] duration-100"
                       rows={1}
                       value={inputValue}
