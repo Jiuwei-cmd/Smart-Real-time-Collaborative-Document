@@ -9,14 +9,34 @@ import {
 } from "@/components/ui/drawer";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, TextStreamChatTransport } from "ai";
-import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine } from "lucide-react";
+import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { useUserStore } from "@/app/store/useUserStore";
+import { fetchAISessions, fetchAIMessages, AISession } from "@/lib/api/messageAI";
 
 interface AIDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+/**
+ * 格式化会话创建时间显示
+ */
+function formatSessionTime(dateString: string) {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    
+    if (isToday) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  } catch {
+    return dateString;
+  }
 }
 
 export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
@@ -24,8 +44,16 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   
+  // 新增：用户状态与会话列表状态
+  const { user } = useUserStore();
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+
+  const [sessions, setSessions] = useState<AISession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
   // 1. 适配 AI SDK 6.0 全新 Transport 架构 (完美匹配后端的 TextStream 协议)
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, setMessages } = useChat({
     transport: new TextStreamChatTransport({
       api: "/api/chat",
       body: {
@@ -38,6 +66,10 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
         if (sessionId) {
           setActiveSessionId(sessionId);
           localStorage.setItem("ai_session_id", sessionId);
+          // 惰性创建新会话成功后，突破 useChat 陈旧闭包，实时拉取左侧列表以展示新会话
+          if (userRef.current?.id) {
+            fetchAISessions(userRef.current.id).then(data => setSessions(data));
+          }
         }
         return res;
       },
@@ -47,7 +79,71 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
   // 状态机判定：submitted 或 streaming 均代表正在请求/思考中
   const isLoading = status === 'submitted' || status === 'streaming';
 
-  // 2. 自动调整文本框高度逻辑
+  // 2. 加载左侧历史会话列表
+  const loadSessions = async () => {
+    if (!user?.id) return;
+    setLoadingSessions(true);
+    try {
+      const data = await fetchAISessions(user.id);
+      setSessions(data);
+      
+      // 自动选中逻辑：优先 localStorage 中记录的 ID，否则选中最近一条
+      const savedSessionId = localStorage.getItem("ai_session_id");
+      if (!activeSessionId) {
+        if (savedSessionId && data.some(s => s.id === savedSessionId)) {
+          setActiveSessionId(savedSessionId);
+        } else if (data.length > 0) {
+          setActiveSessionId(data[0].id);
+          localStorage.setItem("ai_session_id", data[0].id);
+        }
+      }
+    } catch (err) {
+      console.error("加载会话列表失败:", err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  // 当 Drawer 打开或登录用户变化时，拉取会话列表
+  useEffect(() => {
+    if (open && user?.id) {
+      loadSessions();
+    }
+  }, [open, user?.id]);
+
+  // 3. 当 activeSessionId 改变时，自动拉取对应历史消息并注入到 useChat 中
+  useEffect(() => {
+    async function loadHistoryMessages() {
+      if (!activeSessionId) {
+        setMessages([]);
+        return;
+      }
+      try {
+        const historyData = await fetchAIMessages(activeSessionId);
+        const formattedMessages = historyData.map(msg => ({
+          id: msg.id, 
+          role: msg.role, 
+          content: msg.content,
+          parts: [{ type: "text", text: msg.content }],
+        }));
+        setMessages(formattedMessages);
+      } catch (err) {
+        console.error("拉取历史消息记录失败:", err);
+      }
+    }
+    if (open) {
+      loadHistoryMessages();
+    }
+  }, [activeSessionId, open, setMessages]);
+
+  // 4. 新建对话逻辑
+  const handleNewSession = () => {
+    setActiveSessionId(null);
+    localStorage.removeItem("ai_session_id");
+    setMessages([]); // 清空主界面聊天气泡，等待惰性创建
+  };
+
+  // 自动调整文本框高度逻辑
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -56,7 +152,7 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
     }
   }, [inputValue]);
 
-  // 3. 提交发送逻辑
+  // 提交发送逻辑
   const onSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputValue.trim() || isLoading) return;
@@ -66,10 +162,14 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
 
     await sendMessage({
       text: textToSend,
+    }, {
+      body: {
+        sessionId: activeSessionId,
+      }
     });
   };
 
-  // 4. 处理回车键直接发送
+  // 处理回车键直接发送
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -88,21 +188,45 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
                 <History className="w-4 h-4" />
                 历史记录
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Button onClick={handleNewSession} variant="ghost" size="icon" className="h-8 w-8 hover:bg-zinc-200/50 dark:hover:bg-zinc-800" title="新建会话">
                 <PlusCircle className="w-4 h-4" />
               </Button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {/* 模拟历史记录项 */}
-              <div className="p-3 rounded-xl bg-white dark:bg-zinc-800 border shadow-sm text-sm cursor-pointer hover:ring-1 hover:ring-primary/20 transition-all">
-                <p className="font-medium truncate">如何使用 AI 优化笔记？</p>
-                <p className="text-xs text-muted-foreground mt-1">12:30 PM</p>
-              </div>
-              <div className="p-3 rounded-xl text-sm cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all">
-                <p className="font-medium truncate text-zinc-600 dark:text-zinc-400">关于 Supabase 的集成建议</p>
-                <p className="text-xs text-muted-foreground mt-1">昨天</p>
-              </div>
+              {loadingSessions ? (
+                <div className="flex items-center justify-center py-8 text-zinc-400 text-sm gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>加载中...</span>
+                </div>
+              ) : sessions.length === 0 ? (
+                <div className="text-center py-8 text-zinc-400 dark:text-zinc-600 text-xs">
+                  暂无历史记录
+                </div>
+              ) : (
+                sessions.map((session) => {
+                  const isActive = session.id === activeSessionId;
+                  return (
+                    <div
+                      key={session.id}
+                      onClick={() => {
+                        setActiveSessionId(session.id);
+                        localStorage.setItem("ai_session_id", session.id);
+                      }}
+                      className={`p-3 rounded-xl text-sm cursor-pointer transition-all ${
+                        isActive 
+                          ? "bg-white dark:bg-zinc-800 border ring-1 ring-primary/20 shadow-sm font-medium text-zinc-900 dark:text-zinc-100" 
+                          : "hover:bg-zinc-100 dark:hover:bg-zinc-800/50 text-zinc-600 dark:text-zinc-400"
+                      }`}
+                    >
+                      <p className="font-medium truncate">{session.title || "新会话"}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {formatSessionTime(session.created_at)}
+                      </p>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </aside>
 
