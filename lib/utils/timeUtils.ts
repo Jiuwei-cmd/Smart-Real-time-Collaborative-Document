@@ -116,3 +116,21 @@ export function formatChatMessageTime(dateString: string): string {
     }
   }
 }
+
+/**
+ * 格式化会话创建时间显示
+ */
+export function formatSessionTime(dateString: string) {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    
+    if (isToday) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  } catch {
+    return dateString;
+  }
+}

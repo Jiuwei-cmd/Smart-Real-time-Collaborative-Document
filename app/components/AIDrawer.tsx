@@ -8,35 +8,18 @@ import {
   DrawerDescription,
 } from "@/components/ui/drawer";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, TextStreamChatTransport } from "ai";
+import { TextStreamChatTransport } from "ai";
 import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { useUserStore } from "@/app/store/useUserStore";
 import { fetchAISessions, fetchAIMessages, AISession } from "@/lib/api/messageAI";
+import { formatSessionTime } from "@/lib/utils/timeUtils";
 
 interface AIDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-/**
- * 格式化会话创建时间显示
- */
-function formatSessionTime(dateString: string) {
-  try {
-    const date = new Date(dateString);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    
-    if (isToday) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    return date.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
-  } catch {
-    return dateString;
-  }
 }
 
 export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
