@@ -522,7 +522,7 @@ export default function DashboardHomePage() {
       </AlertDialog>
 
       {/* AI 功能图标*/}
-      <div className="fixed bottom-35 right-25 z-50">
+      <div className="fixed bottom-35 right-45 z-50">
         <button
           className="relative group w-12 h-12 flex items-center justify-center rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-300"
           onClick={() => {

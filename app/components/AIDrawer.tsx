@@ -7,10 +7,11 @@ import {
   DrawerTitle,
   DrawerDescription,
 } from "@/components/ui/drawer";
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
-
 
 interface AIDrawerProps {
   open: boolean;
@@ -20,8 +21,32 @@ interface AIDrawerProps {
 export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
   const [inputValue, setInputValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  
+  // 1. 适配 AI SDK 6.0 / @ai-sdk/react 2.0 全新 Transport 架构
+  const { messages, sendMessage, status, setMessages } = useChat({
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: {
+        sessionId: activeSessionId,
+      },
+      // 利用自定义 fetch 拦截响应头，获取持久化的 Session ID
+      fetch: async (url, init) => {
+        const res = await fetch(url, init);
+        const sessionId = res.headers.get("X-Session-Id");
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          localStorage.setItem("ai_session_id", sessionId);
+        }
+        return res;
+      },
+    }),
+  });
 
-  // 自动调整高度逻辑
+  // 状态机判定：submitted 或 streaming 均代表正在请求/思考中
+  const isLoading = status === 'submitted' || status === 'streaming';
+
+  // 2. 自动调整文本框高度逻辑
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
@@ -29,6 +54,27 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
       textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
     }
   }, [inputValue]);
+
+  // 3. 提交发送逻辑
+  const onSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!inputValue.trim() || isLoading) return;
+
+    const textToSend = inputValue;
+    setInputValue(""); // 发送前清空输入框，保持良好交互体验
+
+    await sendMessage({
+      text: textToSend,
+    });
+  };
+
+  // 4. 处理回车键直接发送
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSubmit();
+    }
+  };
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} direction="right">
@@ -60,7 +106,7 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
           </aside>
 
           {/* 右侧：聊天主界面 */}
-          <main className="flex-1 flex flex-col bg-white dark:bg-zinc-950">
+          <main className="flex-1 flex flex-col bg-white dark:bg-zinc-950 overflow-hidden">
             <DrawerHeader className="border-b shrink-0">
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800">
@@ -75,68 +121,118 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
               </div>
             </DrawerHeader>
             
+            {/* 消息展示区域 */}
             <div className="flex-1 p-6 overflow-y-auto">
-              {/* 占位内容 - 保持不动 */}
-              <div className="flex flex-col items-center justify-center h-full space-y-4 text-center">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-primary/10 blur-2xl rounded-full"></div>
-                  <Sparkle className="relative w-16 h-16 text-zinc-200 dark:text-zinc-700" />
+              {messages.length === 0 ? (
+                /* 初始空状态占位内容 */
+                <div className="flex flex-col items-center justify-center h-full space-y-4 text-center">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-primary/10 blur-2xl rounded-full"></div>
+                    <Sparkle className="relative w-16 h-16 text-zinc-200 dark:text-zinc-700" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-medium">你好，我是小艺</h3>
+                    <p className="text-sm text-muted-foreground max-w-[240px]">
+                      很高兴为您服务，你可以给我说您的需要。
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <h3 className="text-xl font-medium">你好，我是小艺</h3>
-                  <p className="text-sm text-muted-foreground max-w-[240px]">
-                    很高兴为您服务，你可以给我说您的需要。
-                  </p>
+              ) : (
+                /* 真实对话列表 */
+                <div className="space-y-6 max-w-4xl mx-auto pb-4">
+                  {messages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex gap-3 ${
+                        message.role === 'user' ? 'justify-end' : 'justify-start'
+                      }`}
+                    >
+                      {message.role === 'assistant' && (
+                        <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 shrink-0 mt-0.5 shadow-sm">
+                          <Sparkle className="w-4 h-4 text-zinc-900 dark:text-zinc-100" />
+                        </div>
+                      )}
+                      <div
+                        className={`rounded-2xl p-4 text-sm max-w-[82%] leading-relaxed shadow-sm ${
+                          message.role === 'user'
+                            ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-none font-medium'
+                            : 'bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-none'
+                        }`}
+                      >
+                        {message.content}
+                      </div>
+                      {message.role === 'user' && (
+                        <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shrink-0 mt-0.5 text-xs font-semibold shadow-sm">
+                          我
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {/* AI 思考中加载状态 */}
+                  {isLoading && messages[messages.length - 1]?.role === 'user' && (
+                    <div className="flex gap-3 justify-start items-center">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-100 dark:bg-zinc-800 shrink-0 shadow-sm">
+                        <Sparkle className="w-4 h-4 animate-spin text-zinc-500" />
+                      </div>
+                      <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-2xl p-4 text-sm text-zinc-500 rounded-bl-none animate-pulse">
+                        小艺正在思考中...
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* 底部输入框 - 极简无边框样式 */}
-            <div className="p-4 bg-white dark:bg-zinc-950 shrink-0">
-              <div className="relative bg-zinc-100/60 dark:bg-zinc-900/60 rounded-[24px] transition-all focus-within:bg-zinc-100 dark:focus-within:bg-zinc-900">
-                <div className="p-4 pb-0">
-                  <textarea
-                    ref={textareaRef}
-                    placeholder="深度分析需求并解答，你需要什么帮助？"
-                    className="w-full bg-transparent border-none focus:ring-0 outline-none resize-none text-sm min-h-[40px] max-h-[120px] py-2 placeholder:text-zinc-500 overflow-y-auto transition-[height] duration-100"
-                    rows={1}
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                  />
-                </div>
-                
-                <div className="flex items-center justify-between px-3 pb-3">
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
-                      <Plus className="w-4 h-4" />
-                    </Button>
+            {/* 底部输入框 - 表单包装以支持 onSubmit */}
+            <div className="p-4 bg-white dark:bg-zinc-950 shrink-0 border-t border-zinc-100 dark:border-zinc-900">
+              <form onSubmit={onSubmit} className="max-w-4xl mx-auto">
+                <div className="relative bg-zinc-100/60 dark:bg-zinc-900/60 rounded-[24px] transition-all focus-within:bg-zinc-100 dark:focus-within:bg-zinc-900 border border-transparent focus-within:border-zinc-200 dark:focus-within:border-zinc-800 shadow-sm">
+                  <div className="p-4 pb-0">
+                    <textarea
+                      ref={textareaRef}
+                      placeholder="深度分析需求并解答，你需要什么帮助？"
+                      className="w-full bg-transparent border-none focus:ring-0 outline-none resize-none text-sm min-h-[40px] max-h-[120px] py-2 placeholder:text-zinc-500 overflow-y-auto transition-[height] duration-100"
+                      rows={1}
+                      value={inputValue}
+                      onChange={(e) => setInputValue(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                    />
                   </div>
+                  
+                  <div className="flex items-center justify-between px-3 pb-3">
+                    <div className="flex items-center gap-1">
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
+                        <Plus className="w-4 h-4" />
+                      </Button>
+                    </div>
 
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
-                      <ScanLine className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
-                      <Mic className="w-4 h-4" />
-                    </Button>
-                    
-                    <Button 
-                      size="icon" 
-                      className={`h-9 w-9 rounded-full transition-all duration-300 ml-1 ${
-                        inputValue.trim() 
-                        ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm" 
-                        : "bg-transparent text-zinc-400 opacity-50 cursor-not-allowed"
-                      }`}
-                      disabled={!inputValue.trim()}
-                    >
-                      <Send className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
+                        <ScanLine className="w-4 h-4" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-9 w-9 rounded-full text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800">
+                        <Mic className="w-4 h-4" />
+                      </Button>
+                      
+                      <Button 
+                        type="submit"
+                        size="icon" 
+                        className={`h-9 w-9 rounded-full transition-all duration-300 ml-1 ${
+                          inputValue.trim() && !isLoading
+                          ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm hover:opacity-90" 
+                          : "bg-transparent text-zinc-400 opacity-50 cursor-not-allowed"
+                        }`}
+                        disabled={!inputValue.trim() || isLoading}
+                      >
+                        <Send className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <p className="text-[10px] text-center text-zinc-400 mt-3">
-                AI 助手可能会产生错误，请验证其回答。
-              </p>
+                <p className="text-[10px] text-center text-zinc-400 mt-3">
+                  AI 助手可能会产生错误，请验证其回答。
+                </p>
+              </form>
             </div>
           </main>
         </div>
