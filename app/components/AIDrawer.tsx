@@ -8,10 +8,11 @@ import {
   DrawerDescription,
 } from "@/components/ui/drawer";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, TextStreamChatTransport } from "ai";
 import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface AIDrawerProps {
   open: boolean;
@@ -23,9 +24,9 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   
-  // 1. 适配 AI SDK 6.0 / @ai-sdk/react 2.0 全新 Transport 架构
-  const { messages, sendMessage, status, setMessages } = useChat({
-    transport: new DefaultChatTransport({
+  // 1. 适配 AI SDK 6.0 全新 Transport 架构 (完美匹配后端的 TextStream 协议)
+  const { messages, sendMessage, status } = useChat({
+    transport: new TextStreamChatTransport({
       api: "/api/chat",
       body: {
         sessionId: activeSessionId,
@@ -78,7 +79,7 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange} direction="right">
-      <DrawerContent className="h-full rounded-none border-l shadow-2xl sm:max-w-[1000px] w-[90vw]" drawerWidth="sm:max-w-[1000px]">
+      <DrawerContent className="h-full rounded-none border-l shadow-2xl sm:max-w-[1200px] w-[90vw]" drawerWidth="sm:max-w-[1200px]">
         <div className="flex h-full overflow-hidden">
           {/* 左侧：历史对话列表 */}
           <aside className="w-64 border-r bg-zinc-50/50 dark:bg-zinc-900/50 flex flex-col shrink-0">
@@ -156,10 +157,19 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
                         className={`rounded-2xl p-4 text-sm max-w-[82%] leading-relaxed shadow-sm ${
                           message.role === 'user'
                             ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-br-none font-medium'
-                            : 'bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-none'
+                            : 'bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-none overflow-x-auto'
                         }`}
                       >
-                        {message.content}
+                        {(() => {
+                          const textContent = message.parts 
+                            ? message.parts.filter((part) => part.type === 'text').map((part) => part.text).join('')
+                            : (message as any).content || (message as any).text || "";
+
+                          if (message.role === 'user') {
+                            return <div className="whitespace-pre-wrap">{textContent}</div>;
+                          }
+                          return <MarkdownRenderer content={textContent} />;
+                        })()}
                       </div>
                       {message.role === 'user' && (
                         <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shrink-0 mt-0.5 text-xs font-semibold shadow-sm">
