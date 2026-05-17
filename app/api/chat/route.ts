@@ -1,7 +1,8 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, convertToModelMessages } from 'ai';
 import { createAISession, saveAIMessage, getServerUser } from '@/lib/api/messageAI';
-import { fetchNoteById, extractTextFromContent } from '@/lib/api/notes';
+import { extractTextFromContent } from '@/lib/api/notes';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // 1. 初始化阿里云百炼 Provider (利用兼容模式)
 const dashscope = createOpenAI({
@@ -43,7 +44,11 @@ export async function POST(req: Request) {
     // 4.5. 如果有引用的文档，获取文档内容并构建 System Prompt
     let systemPrompt = "你是一个智能协同文档助手，名叫小艺。";
     if (documentIds && Array.isArray(documentIds) && documentIds.length > 0) {
-      const docs = await Promise.all(documentIds.map((id: string) => fetchNoteById(id)));
+      const supabase = await createServerSupabaseClient();
+      const docs = await Promise.all(documentIds.map(async (id: string) => {
+        const { data } = await supabase.from('notes').select('*').eq('id', id).eq('is_deleted', false).single();
+        return data;
+      }));
       const validDocs = docs.filter(Boolean);
       if (validDocs.length > 0) {
         systemPrompt += "\n\n用户引用了以下文档内容，请基于以下文档内容来回答用户的问题（如果是总结、修改、提取等要求，请重点参考这些内容）：\n";
