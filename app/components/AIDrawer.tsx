@@ -9,12 +9,14 @@ import {
 } from "@/components/ui/drawer";
 import { useChat } from "@ai-sdk/react";
 import { TextStreamChatTransport } from "ai";
-import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine, Loader2 } from "lucide-react";
+import { Sparkle, PlusCircle, History, Plus, Mic, Send, ScanLine, Loader2, X, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
+import { useDebounce } from "use-debounce";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { useUserStore } from "@/app/store/useUserStore";
 import { fetchAISessions, fetchAIMessages, AISession } from "@/lib/api/messageAI";
+import { fetchNotes, Note } from "@/lib/api/notes";
 import { formatSessionTime } from "@/lib/utils/timeUtils";
 
 interface AIDrawerProps {
@@ -25,6 +27,7 @@ interface AIDrawerProps {
 export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
   const [inputValue, setInputValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   
   // 新增：用户状态与会话列表状态
@@ -34,6 +37,85 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
 
   const [sessions, setSessions] = useState<AISession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
+
+  // 文档引用状态
+  const [mentionQuery, setMentionQuery] = useState<{ query: string, index: number } | null>(null);
+  const [mentionedDocs, setMentionedDocs] = useState<{ id: string; title: string }[]>([]);
+  const [searchedDocs, setSearchedDocs] = useState<Note[]>([]);
+  const [isSearchingDocs, setIsSearchingDocs] = useState(false);
+  const [debouncedSearchQuery] = useDebounce(mentionQuery?.query || "", 300);
+  const isMentioning = mentionQuery !== null;
+
+  // 监听 @ 搜索
+  useEffect(() => {
+    if (!isMentioning || !user?.id) {
+      setSearchedDocs([]);
+      return;
+    }
+    
+    let isMounted = true;
+    const searchDocs = async () => {
+      setIsSearchingDocs(true);
+      try {
+        const result = await fetchNotes({
+          userId: user.id,
+          searchKeyword: debouncedSearchQuery,
+          pageSize: 100
+        });
+        if (isMounted) {
+          setSearchedDocs(result.notes);
+        }
+      } catch (err) {
+        console.error("搜索文档失败:", err);
+      } finally {
+        if (isMounted) {
+          setIsSearchingDocs(false);
+        }
+      }
+    };
+    
+    searchDocs();
+    
+    return () => { isMounted = false; };
+  }, [debouncedSearchQuery, isMentioning, user?.id]);
+
+  // 处理文本输入
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInputValue(value);
+    
+    const cursorPosition = e.target.selectionStart;
+    const textBeforeCursor = value.slice(0, cursorPosition);
+    
+    // 匹配末尾的 @ 后跟非空字符
+    const match = textBeforeCursor.match(/@([^\s]*)$/);
+    if (match) {
+      setMentionQuery({ query: match[1], index: match.index! });
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  // 选择文档
+  const handleSelectDoc = (doc: Note) => {
+    if (!mentionQuery) return;
+    
+    // 移除触发搜索的 @ 字符串部分
+    const newValue = 
+      inputValue.substring(0, mentionQuery.index) + 
+      inputValue.substring(mentionQuery.index + mentionQuery.query.length + 1);
+      
+    setInputValue(newValue);
+    setMentionQuery(null);
+    
+    if (!mentionedDocs.find(d => d.id === doc.id)) {
+      setMentionedDocs([...mentionedDocs, { id: doc.id, title: doc.title }]);
+    }
+    
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
 
   // 1. 适配 AI SDK 6.0 全新 Transport 架构 (完美匹配后端的 TextStream 协议)
   const { messages, sendMessage, status, setMessages } = useChat({
@@ -135,19 +217,41 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
     }
   }, [inputValue]);
 
+  // 当消息更新时自动滚动到底部
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView();
+    }
+  }, [messages]);
+
   // 提交发送逻辑
   const onSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
+    if ((!inputValue.trim() && mentionedDocs.length === 0) || isLoading) return;
 
-    const textToSend = inputValue;
+    let textToSend = inputValue.trim();
+    const activeDocIds = mentionedDocs.map(doc => doc.id);
+
+    // 将引用的文档信息拼接到文本中，以便在聊天界面和历史记录中展示
+    if (mentionedDocs.length > 0) {
+      const docTags = mentionedDocs.map(d => `📄 ${d.title}`).join('  ');
+      if (textToSend) {
+        textToSend = `${docTags}\n\n${textToSend}`;
+      } else {
+        textToSend = `${docTags}\n\n请分析以上文档`;
+      }
+    }
+
     setInputValue(""); // 发送前清空输入框，保持良好交互体验
+    setMentionQuery(null);
+    setMentionedDocs([]); // 清空已引用的文档
 
     await sendMessage({
       text: textToSend,
     }, {
       body: {
         sessionId: activeSessionId,
+        documentIds: activeDocIds.length > 0 ? activeDocIds : undefined,
       }
     });
   };
@@ -296,6 +400,8 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
                       </div>
                     </div>
                   )}
+                  {/* 用于自动滚动的锚点 */}
+                  <div ref={messagesEndRef} className="h-1" />
                 </div>
               )}
             </div>
@@ -304,14 +410,63 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
             <div className="p-4 bg-white dark:bg-zinc-950 shrink-0 border-t border-zinc-100 dark:border-zinc-900">
               <form onSubmit={onSubmit} className="max-w-4xl mx-auto">
                 <div className="relative bg-zinc-100/60 dark:bg-zinc-900/60 rounded-[24px] transition-all focus-within:bg-zinc-100 dark:focus-within:bg-zinc-900 border border-transparent focus-within:border-zinc-200 dark:focus-within:border-zinc-800 shadow-sm">
-                  <div className="p-4 pb-0">
+                  {/* 文档引用选择列表 */}
+                  {mentionQuery && (
+                    <div className="absolute bottom-full left-4 mb-2 w-64 max-h-60 overflow-y-auto bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-lg z-50">
+                      {isSearchingDocs ? (
+                        <div className="p-3 text-sm text-zinc-500 flex items-center justify-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" /> 搜索中...
+                        </div>
+                      ) : searchedDocs.length > 0 ? (
+                        <div className="p-1">
+                          {searchedDocs.map(doc => (
+                            <div 
+                              key={doc.id} 
+                              className="px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer flex items-center gap-2 text-sm transition-colors"
+                              onClick={() => handleSelectDoc(doc)}
+                            >
+                              {/* <div className="w-5 h-5 flex items-center justify-center rounded bg-primary/10 text-primary shrink-0">
+                                <ScanLine className="w-3 h-3" />
+                              </div> */}
+                              <span className="truncate">{doc.title}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-3 text-sm text-zinc-500 text-center">
+                          未找到相关文档
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="p-4 pb-0 flex flex-col gap-2">
+                    {/* 已选中的文档标签 */}
+                    {mentionedDocs.length > 0 && (
+                      <div className="flex flex-wrap gap-2 px-1">
+                        {mentionedDocs.map(doc => (
+                          <div key={doc.id} className="flex items-center gap-1 bg-zinc-200/80 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-300 px-2.5 py-1 rounded-md text-xs">
+                            <FileText className="w-3 h-3" />
+                            <span className="truncate max-w-[150px]">{doc.title}</span>
+                            <button 
+                              type="button"
+                              onClick={() => setMentionedDocs(prev => prev.filter(d => d.id !== doc.id))}
+                              className="ml-1 hover:text-red-500 rounded-full p-0.5 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <textarea
                       ref={textareaRef}
                       placeholder="您可以询问任何问题， @文档 可以针对文档进行提问"
                       className="w-full bg-transparent border-none focus:ring-0 outline-none resize-none text-sm min-h-[40px] max-h-[120px] py-2 placeholder:text-zinc-500 overflow-y-auto transition-[height] duration-100"
                       rows={1}
                       value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
+                      onChange={handleInputChange}
                       onKeyDown={handleKeyDown}
                     />
                   </div>
@@ -335,11 +490,11 @@ export function AIDrawer({ open, onOpenChange }: AIDrawerProps) {
                         type="submit"
                         size="icon" 
                         className={`h-9 w-9 rounded-full transition-all duration-300 ml-1 ${
-                          inputValue.trim() && !isLoading
+                          (inputValue.trim() || mentionedDocs.length > 0) && !isLoading
                           ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm hover:opacity-90" 
                           : "bg-transparent text-zinc-400 opacity-50 cursor-not-allowed"
                         }`}
-                        disabled={!inputValue.trim() || isLoading}
+                        disabled={(!inputValue.trim() && mentionedDocs.length === 0) || isLoading}
                       >
                         <Send className="w-4 h-4" />
                       </Button>

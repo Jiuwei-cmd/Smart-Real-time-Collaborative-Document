@@ -104,6 +104,7 @@
     "tailwind-merge": "^3.4.0",
     "tailwind-scrollbar-hide": "^4.0.0",
     "uploadthing": "^7.7.4",
+    "use-debounce": "^10.1.1",
     "use-file-picker": "^2.1.2",
     "vaul": "^1.1.2",
     "zod": "^4.3.5"

@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, convertToModelMessages } from 'ai';
 import { createAISession, saveAIMessage, getServerUser } from '@/lib/api/messageAI';
+import { fetchNoteById, extractTextFromContent } from '@/lib/api/notes';
 
 // 1. 初始化阿里云百炼 Provider (利用兼容模式)
 const dashscope = createOpenAI({
@@ -10,7 +11,7 @@ const dashscope = createOpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { messages, sessionId } = await req.json();
+    const { messages, sessionId, documentIds } = await req.json();
     const user = await getServerUser();
 
     if (!user) {
@@ -39,9 +40,25 @@ export async function POST(req: Request) {
     // 4. 将前端发送的 UIMessages 转换为 ModelMessages 规范
     const modelMessages = await convertToModelMessages(messages);
 
+    // 4.5. 如果有引用的文档，获取文档内容并构建 System Prompt
+    let systemPrompt = "你是一个智能协同文档助手，名叫小艺。";
+    if (documentIds && Array.isArray(documentIds) && documentIds.length > 0) {
+      const docs = await Promise.all(documentIds.map((id: string) => fetchNoteById(id)));
+      const validDocs = docs.filter(Boolean);
+      if (validDocs.length > 0) {
+        systemPrompt += "\n\n用户引用了以下文档内容，请基于以下文档内容来回答用户的问题（如果是总结、修改、提取等要求，请重点参考这些内容）：\n";
+        validDocs.forEach((doc, index) => {
+          if (!doc) return;
+          const textContent = extractTextFromContent(doc.title, doc.content);
+          systemPrompt += `\n--- 文档: ${doc.title} ---\n${textContent}\n-------------------\n`;
+        });
+      }
+    }
+
     // 5. 调用通义千问大模型并流式返回
     const result = await streamText({
       model: dashscope('qwen-plus'), // 或 qwen-max
+      system: systemPrompt,
       messages: modelMessages,
       onFinish: async ({ text }) => {
         await saveAIMessage(currentSessionId, 'assistant', text).catch(err => {
